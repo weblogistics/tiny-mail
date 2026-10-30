@@ -1,0 +1,159 @@
+.list {
+  width: 340px;
+  min-width: 240px;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  background: var(--list-bg);
+  border-right: 1px solid var(--border);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--list-bg-alt);
+}
+
+.syncing {
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 12px 9px;
+  text-align: left;
+  border-bottom: 1px solid var(--list-bg-alt);
+}
+
+.row:hover {
+  background: var(--list-bg-alt);
+}
+
+.row.active {
+  background: var(--selection-bg);
+}
+
+.dotColumn {
+  width: 10px;
+  padding-top: 5px;
+  flex-shrink: 0;
+}
+
+.unreadDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--unread-dot);
+  display: inline-block;
+}
+
+.row.active .unreadDot {
+  background: var(--selection-text);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.topLine {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sender {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.row.unread .sender {
+  font-weight: 700;
+}
+
+.row.active .sender {
+  color: var(--selection-text);
+}
+
+.date {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.row.active .date {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.subjectLine {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.row.active .subject {
+  color: var(--selection-text);
+}
+
+.flagIcon {
+  color: var(--flag-orange);
+  flex-shrink: 0;
+}
+
+.attachIcon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.row.active .attachIcon {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.row.active .snippet {
+  color: rgba(255, 255, 255, 0.75);
+}
