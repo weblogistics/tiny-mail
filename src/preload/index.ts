@@ -6,12 +6,17 @@ const api: TinyMailApi = {
   accounts: {
     list: () => ipcRenderer.invoke(IpcChannels.AccountsList),
     add: (config, password) => ipcRenderer.invoke(IpcChannels.AccountsAdd, config, password),
+    update: (accountId, config, password) =>
+      ipcRenderer.invoke(IpcChannels.AccountsUpdate, accountId, config, password),
     remove: (accountId) => ipcRenderer.invoke(IpcChannels.AccountsRemove, accountId),
     testConnection: (config, password) =>
       ipcRenderer.invoke(IpcChannels.AccountsTestConnection, config, password)
   },
   mailboxes: {
-    list: (accountId) => ipcRenderer.invoke(IpcChannels.MailboxesList, accountId)
+    list: (accountId) => ipcRenderer.invoke(IpcChannels.MailboxesList, accountId),
+    create: (accountId, name) => ipcRenderer.invoke(IpcChannels.MailboxCreate, accountId, name),
+    rename: (accountId, path, newName) => ipcRenderer.invoke(IpcChannels.MailboxRename, accountId, path, newName),
+    delete: (accountId, path) => ipcRenderer.invoke(IpcChannels.MailboxDelete, accountId, path)
   },
   messages: {
     list: (accountId, mailboxPath) => ipcRenderer.invoke(IpcChannels.MessagesList, accountId, mailboxPath),
@@ -34,6 +39,11 @@ const api: TinyMailApi = {
     pickAttachments: () => ipcRenderer.invoke(IpcChannels.ComposePickAttachments),
     openWindow: (seed) => ipcRenderer.invoke(IpcChannels.ComposeOpenWindow, seed),
     getInit: () => ipcRenderer.invoke(IpcChannels.ComposeGetInit)
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(IpcChannels.SettingsGet),
+    update: (patch) => ipcRenderer.invoke(IpcChannels.SettingsUpdate, patch),
+    openWindow: () => ipcRenderer.invoke(IpcChannels.SettingsOpenWindow)
   },
   events: {
     subscribe: (listener) => {

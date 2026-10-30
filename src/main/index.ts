@@ -3,6 +3,7 @@ import { createMainWindow } from './windows/mainWindow'
 import { AccountStore } from './accounts/accountStore'
 import { ImapService } from './imap/imapService'
 import { SmtpService } from './smtp/smtpService'
+import { SettingsStore } from './settings/settingsStore'
 import { registerIpcHandlers, broadcast } from './ipc/registerIpcHandlers'
 
 app.setName('Tiny Mail')
@@ -19,8 +20,9 @@ async function bootstrap(): Promise<void> {
   const accountStore = new AccountStore()
   imapService = new ImapService(accountStore, broadcast)
   const smtpService = new SmtpService(accountStore)
+  const settingsStore = new SettingsStore()
 
-  registerIpcHandlers(accountStore, imapService, smtpService)
+  registerIpcHandlers(accountStore, imapService, smtpService, settingsStore)
   createMainWindow()
 
   app.on('activate', () => {

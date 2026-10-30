@@ -192,6 +192,33 @@ export const IconClearFormat = (p: IconProps) => (
   </svg>
 )
 
+export const IconGear = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="3.2" />
+    <path d="M12 3.5v2.4M12 18.1v2.4M4.9 6.5l1.7 1.7M17.4 15.8l1.7 1.7M3.5 12h2.4M18.1 12h2.4M4.9 17.5l1.7-1.7M17.4 8.2l1.7-1.7" />
+  </svg>
+)
+
+export const IconPerson = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="8" r="3.5" />
+    <path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7" />
+  </svg>
+)
+
+export const IconFolderPlus = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+    <path d="M12 12v5M9.5 14.5h5" />
+  </svg>
+)
+
+export const IconPencil = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 20h4L18 10l-4-4L4 16v4z" />
+  </svg>
+)
+
 export const IconSidebar = (p: IconProps) => (
   <svg {...base(p)}>
     <rect x="3.5" y="4.5" width="17" height="15" rx="2" />

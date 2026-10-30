@@ -23,6 +23,7 @@ export function getDb(): Database.Database {
       unreadCount INTEGER DEFAULT 0,
       totalCount INTEGER DEFAULT 0,
       flags TEXT DEFAULT '[]',
+      delimiter TEXT DEFAULT '/',
       PRIMARY KEY (accountId, path)
     );
 
@@ -59,12 +60,17 @@ export function getDb(): Database.Database {
     );
   `)
 
-  // ccJson was added after the initial release; backfill it for anyone
-  // upgrading from a cache file created before this column existed.
-  const columns = db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[]
-  if (!columns.some((c) => c.name === 'ccJson')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN ccJson TEXT DEFAULT '[]'`)
-  }
+  ensureColumn(db, 'messages', 'ccJson', `ALTER TABLE messages ADD COLUMN ccJson TEXT DEFAULT '[]'`)
+  ensureColumn(db, 'mailboxes', 'delimiter', `ALTER TABLE mailboxes ADD COLUMN delimiter TEXT DEFAULT '/'`)
 
   return db
+}
+
+// Columns added after the initial release need a migration for anyone
+// upgrading from a cache file created before the column existed.
+function ensureColumn(db: Database.Database, table: string, column: string, addColumnSql: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(addColumnSql)
+  }
 }

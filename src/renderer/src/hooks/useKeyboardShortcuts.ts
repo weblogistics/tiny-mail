@@ -40,6 +40,12 @@ export function useKeyboardShortcuts(): void {
         return
       }
 
+      if (mod && e.key === ',') {
+        e.preventDefault()
+        window.api.settings.openWindow()
+        return
+      }
+
       if (mod && e.key.toLowerCase() === 'f' && !e.shiftKey) {
         e.preventDefault()
         document.querySelector<HTMLInputElement>('input[placeholder="Search"]')?.focus()

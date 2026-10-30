@@ -26,7 +26,10 @@ export class AccountStore {
     }
     try {
       const raw = readFileSync(this.filePath, 'utf-8')
-      this.accounts = JSON.parse(raw)
+      const parsed = JSON.parse(raw) as StoredAccount[]
+      // `signature` was added after the initial release; default it for
+      // accounts saved before the field existed.
+      this.accounts = parsed.map((a) => ({ ...a, signature: a.signature ?? '' }))
     } catch {
       this.accounts = []
     }
@@ -58,6 +61,23 @@ export class AccountStore {
     this.accounts.push(account)
     this.persist()
     const { encryptedPassword, ...rest } = account
+    return rest
+  }
+
+  update(accountId: string, config: Omit<AccountConfig, 'id'>, password?: string): AccountConfig {
+    const idx = this.accounts.findIndex((a) => a.id === accountId)
+    if (idx < 0) throw new Error(`Unknown account: ${accountId}`)
+
+    const encryptedPassword = password
+      ? safeStorage.isEncryptionAvailable()
+        ? safeStorage.encryptString(password).toString('base64')
+        : Buffer.from(password, 'utf-8').toString('base64')
+      : this.accounts[idx].encryptedPassword
+
+    const updated: StoredAccount = { ...config, id: accountId, encryptedPassword }
+    this.accounts[idx] = updated
+    this.persist()
+    const { encryptedPassword: _unused, ...rest } = updated
     return rest
   }
 

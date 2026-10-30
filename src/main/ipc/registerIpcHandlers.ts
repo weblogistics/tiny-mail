@@ -4,12 +4,21 @@ import { statSync } from 'fs'
 import { basename } from 'path'
 import mime from 'mime-types'
 import { IpcChannels } from '@shared/ipc'
-import type { AccountConfig, ComposeDraft, ComposeSeed, MailEventPayload, MessageSummary } from '@shared/types'
+import type {
+  AccountConfig,
+  AppSettings,
+  ComposeDraft,
+  ComposeSeed,
+  MailEventPayload,
+  MessageSummary
+} from '@shared/types'
 import type { AccountStore } from '../accounts/accountStore'
 import type { ImapService } from '../imap/imapService'
+import type { SettingsStore } from '../settings/settingsStore'
 import { verifySmtpConfig, type SmtpService } from '../smtp/smtpService'
 import { searchMessages } from '../db/messageCache'
 import { openComposeWindow, takeComposeInit } from '../windows/composeWindow'
+import { openSettingsWindow } from '../windows/settingsWindow'
 
 export function broadcast(payload: MailEventPayload): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -20,7 +29,8 @@ export function broadcast(payload: MailEventPayload): void {
 export function registerIpcHandlers(
   accountStore: AccountStore,
   imapService: ImapService,
-  smtpService: SmtpService
+  smtpService: SmtpService,
+  settingsStore: SettingsStore
 ): void {
   ipcMain.handle(IpcChannels.AccountsList, () => accountStore.list())
 
@@ -34,12 +44,23 @@ export function registerIpcHandlers(
         // Account is saved even if the first connection attempt fails; the
         // user can retry from the UI once credentials/network are sorted.
       }
+      broadcast({ type: 'accounts-changed', data: null })
+      return account
+    }
+  )
+
+  ipcMain.handle(
+    IpcChannels.AccountsUpdate,
+    (_e, accountId: string, config: Omit<AccountConfig, 'id'>, password?: string) => {
+      const account = accountStore.update(accountId, config, password)
+      broadcast({ type: 'accounts-changed', data: null })
       return account
     }
   )
 
   ipcMain.handle(IpcChannels.AccountsRemove, (_e, accountId: string) => {
     accountStore.remove(accountId)
+    broadcast({ type: 'accounts-changed', data: null })
   })
 
   ipcMain.handle(
@@ -77,6 +98,18 @@ export function registerIpcHandlers(
       .then((fresh) => fresh.forEach((mb) => broadcast({ type: 'mailbox-updated', data: mb })))
       .catch(() => void 0)
     return cached
+  })
+
+  ipcMain.handle(IpcChannels.MailboxCreate, async (_e, accountId: string, name: string) => {
+    await imapService.createMailbox(accountId, name)
+  })
+
+  ipcMain.handle(IpcChannels.MailboxRename, async (_e, accountId: string, path: string, newName: string) => {
+    await imapService.renameMailbox(accountId, path, newName)
+  })
+
+  ipcMain.handle(IpcChannels.MailboxDelete, async (_e, accountId: string, path: string) => {
+    await imapService.deleteMailbox(accountId, path)
   })
 
   ipcMain.handle(IpcChannels.MessagesList, (_e, accountId: string, mailboxPath: string) => {
@@ -168,6 +201,18 @@ export function registerIpcHandlers(
       contentType: mime.lookup(path) || 'application/octet-stream',
       size: statSync(path).size
     }))
+  })
+
+  ipcMain.handle(IpcChannels.SettingsGet, () => settingsStore.get())
+
+  ipcMain.handle(IpcChannels.SettingsUpdate, (_e, patch: Partial<AppSettings>) => {
+    const updated = settingsStore.update(patch)
+    broadcast({ type: 'settings-updated', data: updated })
+    return updated
+  })
+
+  ipcMain.handle(IpcChannels.SettingsOpenWindow, () => {
+    openSettingsWindow()
   })
 
   ipcMain.handle(IpcChannels.WindowMinimize, (e) => {

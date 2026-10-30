@@ -10,6 +10,15 @@ export interface AccountConfig {
   smtpSecure: boolean
   username: string
   color: string
+  signature: string
+}
+
+// A password is only included when the user is changing it; omitting it
+// during an update leaves the stored credential untouched.
+export interface AccountUpdate {
+  id: string
+  config: Omit<AccountConfig, 'id'>
+  password?: string
 }
 
 // Credentials are kept separate from AccountConfig so they never round-trip
@@ -28,6 +37,7 @@ export interface MailboxSummary {
   unreadCount: number
   totalCount: number
   flags: string[]
+  delimiter: string
 }
 
 export interface MessageAddress {
@@ -111,8 +121,15 @@ export interface SyncProgress {
   done: boolean
 }
 
+export interface AppSettings {
+  markAsReadBehavior: 'instant' | 'never'
+  loadRemoteImagesByDefault: boolean
+}
+
 export type MailEventPayload =
   | { type: 'sync-progress'; data: SyncProgress }
   | { type: 'mailbox-updated'; data: MailboxSummary }
   | { type: 'new-message'; data: MessageSummary }
   | { type: 'account-status'; data: { accountId: string; status: 'connecting' | 'online' | 'offline' | 'error'; error?: string } }
+  | { type: 'settings-updated'; data: AppSettings }
+  | { type: 'accounts-changed'; data: null }

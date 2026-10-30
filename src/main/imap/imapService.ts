@@ -5,6 +5,7 @@ import {
   getMessageBody,
   listMailboxes as cachedListMailboxes,
   listMessages as cachedListMessages,
+  removeMailbox as removeCachedMailbox,
   removeMessage,
   saveMessageBody,
   setMessageFlags,
@@ -135,7 +136,8 @@ export class ImapService {
         specialUse,
         unreadCount,
         totalCount,
-        flags: Array.from(mailbox.flags ?? [])
+        flags: Array.from(mailbox.flags ?? []),
+        delimiter: mailbox.delimiter || '/'
       }
       summaries.push(summary)
       upsertMailbox(summary)
@@ -337,6 +339,35 @@ export class ImapService {
     } finally {
       lock.release()
     }
+  }
+
+  // Top-level only: a folder's hierarchy delimiter is server-specific ('/'
+  // vs '.', etc.), so creating *nested* folders safely means knowing that
+  // delimiter, which ImapFlow's array path form handles for a single new
+  // name without us needing to know it at all.
+  async createMailbox(accountId: string, name: string): Promise<void> {
+    const client = await this.getClient(accountId)
+    await client.mailboxCreate([name])
+    await this.listMailboxes(accountId)
+  }
+
+  async renameMailbox(accountId: string, path: string, newName: string): Promise<void> {
+    const client = await this.getClient(accountId)
+    const delimiter = cachedListMailboxes(accountId).find((m) => m.path === path)?.delimiter || '/'
+    const segments = path.split(delimiter)
+    segments[segments.length - 1] = newName
+    const newPath = segments.join(delimiter)
+
+    await client.mailboxRename(path, newPath)
+    removeCachedMailbox(accountId, path)
+    await this.listMailboxes(accountId)
+  }
+
+  async deleteMailbox(accountId: string, path: string): Promise<void> {
+    const client = await this.getClient(accountId)
+    await client.mailboxDelete(path)
+    removeCachedMailbox(accountId, path)
+    await this.listMailboxes(accountId)
   }
 
   async appendMessage(

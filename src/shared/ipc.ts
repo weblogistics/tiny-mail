@@ -1,10 +1,14 @@
 export const IpcChannels = {
   AccountsList: 'accounts:list',
   AccountsAdd: 'accounts:add',
+  AccountsUpdate: 'accounts:update',
   AccountsRemove: 'accounts:remove',
   AccountsTestConnection: 'accounts:test-connection',
 
   MailboxesList: 'mailboxes:list',
+  MailboxCreate: 'mailboxes:create',
+  MailboxRename: 'mailboxes:rename',
+  MailboxDelete: 'mailboxes:delete',
 
   MessagesList: 'messages:list',
   MessagesGetBody: 'messages:get-body',
@@ -21,6 +25,10 @@ export const IpcChannels = {
   ComposePickAttachments: 'compose:pick-attachments',
   ComposeOpenWindow: 'compose:open-window',
   ComposeGetInit: 'compose:get-init',
+
+  SettingsGet: 'settings:get',
+  SettingsUpdate: 'settings:update',
+  SettingsOpenWindow: 'settings:open-window',
 
   WindowMinimize: 'window:minimize',
   WindowToggleMaximize: 'window:toggle-maximize',

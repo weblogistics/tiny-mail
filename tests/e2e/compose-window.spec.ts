@@ -1,25 +1,13 @@
 import { test, expect } from '@playwright/test'
 import { launchApp, closeApp, type LaunchedApp } from './helpers/launchApp'
+import { addTestAccount } from './helpers/addTestAccount'
 
 let launched: LaunchedApp
 
 test.beforeEach(async () => {
   launched = await launchApp()
-  // Compose needs an account to address a "From" to. Add one through the
-  // UI rather than poking the account store directly, so this also
-  // exercises the real add-account path.
-  const { window } = launched
-  await window.getByPlaceholder('you@example.com').fill('tester@example.com')
-  await window.locator('input[type="password"]').fill('irrelevant-for-this-test')
-  await window.getByPlaceholder('imap.example.com').fill('imap.example.com')
-  await window.getByPlaceholder('smtp.example.com').fill('smtp.example.com')
-  // We're not testing real connectivity here, and the test profile has no
-  // reachable server — add the account locally without Test Connection.
-  await window.getByRole('button', { name: 'Add Account', exact: true }).click()
-  // Wait for the dialog to actually close rather than racing the click —
-  // addAccount() sets selectedAccountId synchronously in the same update
-  // that closes this dialog, so this is a reliable "account is selected" signal.
-  await expect(window.getByRole('heading', { name: 'Add Account' })).toBeHidden()
+  // Compose needs an account to address a "From" to.
+  await addTestAccount(launched.window)
 })
 
 test.afterEach(async () => {

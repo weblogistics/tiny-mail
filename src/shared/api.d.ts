@@ -1,5 +1,6 @@
 import type {
   AccountConfig,
+  AppSettings,
   ComposeAttachment,
   ComposeDraft,
   ComposeSeed,
@@ -13,6 +14,7 @@ export interface TinyMailApi {
   accounts: {
     list(): Promise<AccountConfig[]>
     add(config: Omit<AccountConfig, 'id'>, password: string): Promise<AccountConfig>
+    update(accountId: string, config: Omit<AccountConfig, 'id'>, password?: string): Promise<AccountConfig>
     remove(accountId: string): Promise<void>
     testConnection(
       config: Omit<AccountConfig, 'id'>,
@@ -21,6 +23,9 @@ export interface TinyMailApi {
   }
   mailboxes: {
     list(accountId: string): Promise<MailboxSummary[]>
+    create(accountId: string, name: string): Promise<void>
+    rename(accountId: string, path: string, newName: string): Promise<void>
+    delete(accountId: string, path: string): Promise<void>
   }
   messages: {
     list(accountId: string, mailboxPath: string): Promise<MessageSummary[]>
@@ -44,6 +49,11 @@ export interface TinyMailApi {
     pickAttachments(): Promise<ComposeAttachment[]>
     openWindow(seed: ComposeSeed): Promise<void>
     getInit(): Promise<ComposeSeed | undefined>
+  }
+  settings: {
+    get(): Promise<AppSettings>
+    update(patch: Partial<AppSettings>): Promise<AppSettings>
+    openWindow(): Promise<void>
   }
   events: {
     subscribe(listener: (payload: MailEventPayload) => void): () => void

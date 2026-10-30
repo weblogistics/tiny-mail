@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   AccountConfig,
+  AppSettings,
   ComposeDraft,
   ComposeMode,
   MailboxSummary,
@@ -42,6 +43,7 @@ interface MailState {
   searchQuery: string
   searchResults: MessageSummary[] | null
   isAccountDialogOpen: boolean
+  settings: AppSettings | null
 
   init(): Promise<void>
   selectAccount(accountId: string): Promise<void>
@@ -49,6 +51,7 @@ interface MailState {
   syncSelectedMailbox(): Promise<void>
   selectMessage(uid: number): Promise<void>
   refreshMailboxes(accountId: string): Promise<void>
+  refreshAccounts(): Promise<void>
   addAccount(config: Omit<AccountConfig, 'id'>, password: string): Promise<void>
   removeAccount(accountId: string): Promise<void>
   setAccountDialogOpen(open: boolean): void
@@ -58,6 +61,9 @@ interface MailState {
   search(query: string): Promise<void>
   clearSearch(): void
   openCompose(mode: ComposeMode, seed?: Partial<ComposeDraft>): void
+  createMailbox(name: string): Promise<void>
+  renameMailbox(path: string, newName: string): Promise<void>
+  deleteMailbox(path: string): Promise<void>
 }
 
 export const useMailStore = create<MailState>((set, get) => ({
@@ -73,6 +79,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   searchQuery: '',
   searchResults: null,
   isAccountDialogOpen: false,
+  settings: null,
 
   async init() {
     window.api.events.subscribe((payload) => {
@@ -92,8 +99,14 @@ export const useMailStore = create<MailState>((set, get) => ({
         })
       } else if (payload.type === 'account-status') {
         set((s) => ({ accountStatus: { ...s.accountStatus, [payload.data.accountId]: payload.data.status } }))
+      } else if (payload.type === 'settings-updated') {
+        set({ settings: payload.data })
+      } else if (payload.type === 'accounts-changed') {
+        get().refreshAccounts()
       }
     })
+
+    window.api.settings.get().then((settings) => set({ settings }))
 
     const accounts = await window.api.accounts.list()
     set({ accounts })
@@ -101,6 +114,16 @@ export const useMailStore = create<MailState>((set, get) => ({
       await get().selectAccount(accounts[0].id)
     } else {
       set({ isAccountDialogOpen: true })
+    }
+  },
+
+  async refreshAccounts() {
+    const accounts = await window.api.accounts.list()
+    const stillSelected = accounts.some((a) => a.id === get().selectedAccountId)
+    set({ accounts })
+    if (!stillSelected) {
+      if (accounts.length > 0) await get().selectAccount(accounts[0].id)
+      else set({ selectedAccountId: null, selectedMailboxPath: null, selectedUid: null, isAccountDialogOpen: true })
     }
   },
 
@@ -140,7 +163,7 @@ export const useMailStore = create<MailState>((set, get) => ({
     set({ selectedUid: uid })
 
     const current = get().messagesByKey[key(accountId, mailboxPath)]?.find((m) => m.uid === uid)
-    if (current && !current.flags.seen) {
+    if (current && !current.flags.seen && get().settings?.markAsReadBehavior !== 'never') {
       await get().setFlags(uid, { seen: true })
     }
 
@@ -255,5 +278,27 @@ export const useMailStore = create<MailState>((set, get) => ({
     const accountId = get().selectedAccountId
     if (!accountId) return
     window.api.compose.openWindow({ accountId, mode, draft: seed ?? {} })
+  },
+
+  async createMailbox(name) {
+    const accountId = get().selectedAccountId
+    if (!accountId || !name.trim()) return
+    await window.api.mailboxes.create(accountId, name.trim())
+    await get().refreshMailboxes(accountId)
+  },
+
+  async renameMailbox(path, newName) {
+    const accountId = get().selectedAccountId
+    if (!accountId || !newName.trim()) return
+    await window.api.mailboxes.rename(accountId, path, newName.trim())
+    await get().refreshMailboxes(accountId)
+  },
+
+  async deleteMailbox(path) {
+    const accountId = get().selectedAccountId
+    if (!accountId) return
+    if (get().selectedMailboxPath === path) set({ selectedMailboxPath: null, selectedUid: null })
+    await window.api.mailboxes.delete(accountId, path)
+    await get().refreshMailboxes(accountId)
   }
 }))

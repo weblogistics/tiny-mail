@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { IconBulletList, IconClearFormat, IconLink, IconNumberedList } from './Icons'
+import { PromptDialog } from './PromptDialog'
 import styles from './RichTextToolbar.module.css'
 
 interface RichTextToolbarProps {
@@ -41,6 +42,8 @@ function readActiveState(el: HTMLElement): ActiveState {
 
 export function RichTextToolbar({ targetRef }: RichTextToolbarProps): JSX.Element {
   const [active, setActive] = useState<ActiveState>(emptyState)
+  const [showLinkPrompt, setShowLinkPrompt] = useState(false)
+  const savedRange = useRef<Range | null>(null)
 
   useEffect(() => {
     const update = (): void => {
@@ -71,9 +74,23 @@ export function RichTextToolbar({ targetRef }: RichTextToolbarProps): JSX.Elemen
 
   const runLink = (e: React.MouseEvent): void => {
     e.preventDefault()
-    const url = window.prompt('Link URL')
-    if (!url) return
+    // Electron doesn't implement window.prompt(), so this needs an in-app
+    // dialog instead — which means an async gap during which the body's
+    // text selection would otherwise be lost (focus moves to the dialog).
+    // Save it now, while it's still live, and restore it on submit.
+    const selection = window.getSelection()
+    savedRange.current = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null
+    setShowLinkPrompt(true)
+  }
+
+  const submitLink = (url: string): void => {
+    setShowLinkPrompt(false)
     targetRef.current?.focus()
+    if (savedRange.current) {
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(savedRange.current)
+    }
     exec('createLink', url)
   }
 
@@ -112,6 +129,17 @@ export function RichTextToolbar({ targetRef }: RichTextToolbarProps): JSX.Elemen
       <button className={styles.btn} title="Remove Formatting" onMouseDown={run('removeFormat')}>
         <IconClearFormat width={15} height={15} />
       </button>
+
+      {showLinkPrompt && (
+        <PromptDialog
+          title="Add Link"
+          label="URL:"
+          defaultValue="https://"
+          confirmLabel="Add"
+          onSubmit={submitLink}
+          onCancel={() => setShowLinkPrompt(false)}
+        />
+      )}
     </div>
   )
 }

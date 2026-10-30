@@ -36,7 +36,14 @@ export function ComposeStandalone(): JSX.Element | null {
       const [accountList, seed] = await Promise.all([window.api.accounts.list(), window.api.compose.getInit()])
       setAccounts(accountList)
       const accountId = seed?.accountId ?? accountList[0]?.id ?? ''
+      const account = accountList.find((a) => a.id === accountId)
+
       const nextDraft = { ...emptyDraft(accountId), ...seed?.draft }
+      if (account?.signature.trim()) {
+        const signatureHtml = `<div>${account.signature.replace(/\n/g, '<br>')}</div><br>`
+        nextDraft.html = signatureHtml + nextDraft.html
+      }
+
       setMode(seed?.mode ?? 'new')
       setDraft(nextDraft)
       initialHtml.current = nextDraft.html

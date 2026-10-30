@@ -1,0 +1,200 @@
+.loading {
+  color: var(--text-tertiary);
+  padding: 20px 0;
+}
+
+.section {
+  margin-bottom: 24px;
+}
+
+.sectionTitle {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  margin: 0 0 10px;
+}
+
+.radioRow,
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.hint {
+  margin: 6px 0 0 24px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  max-width: 440px;
+}
+
+.accountList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.accountRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--list-bg);
+}
+
+.accountRow + .accountRow {
+  border-top: 1px solid var(--border);
+}
+
+.accountDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.accountInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.accountName {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.accountEmail {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.accountActions {
+  display: flex;
+  gap: 4px;
+}
+
+.iconButton {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text-secondary);
+}
+
+.iconButton:hover {
+  background: rgba(128, 128, 128, 0.18);
+}
+
+.addButton {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.addButton:hover {
+  opacity: 0.9;
+}
+
+.editPanel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.editHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.editTitle {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.signatureField {
+  margin-top: 10px;
+}
+
+.signatureField label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.signatureField textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--list-bg);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.editFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.cancelLink {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.saveButton {
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+}
+
+.testRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.testOk {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(40, 200, 64, 0.14);
+  color: #1a7a2e;
+  font-size: 12px;
+}
+
+.testError {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--danger);
+  font-size: 12px;
+}

@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import type { AccountConfig } from '@shared/types'
+import { AccountFormFields, type AccountFormState } from './AccountFormFields'
 import styles from './AccountSetupDialog.module.css'
 
 const PALETTE = ['#0a84ff', '#ff9f0a', '#28c840', '#ff3b30', '#af52de', '#64d2ff']
 
-type FormState = Omit<AccountConfig, 'id' | 'color'> & { password: string }
-
-const initialForm: FormState = {
+const initialForm: AccountFormState = {
   displayName: '',
   email: '',
   username: '',
@@ -17,7 +16,8 @@ const initialForm: FormState = {
   imapSecure: true,
   smtpHost: '',
   smtpPort: 465,
-  smtpSecure: true
+  smtpSecure: true,
+  signature: ''
 }
 
 export function AccountSetupDialog(): JSX.Element | null {
@@ -25,14 +25,14 @@ export function AccountSetupDialog(): JSX.Element | null {
   const setAccountDialogOpen = useMailStore((s) => s.setAccountDialogOpen)
   const addAccount = useMailStore((s) => s.addAccount)
   const accounts = useMailStore((s) => s.accounts)
-  const [form, setForm] = useState<FormState>(initialForm)
+  const [form, setForm] = useState<AccountFormState>(initialForm)
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   const [testing, setTesting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   if (!isOpen) return null
 
-  const patch = (p: Partial<FormState>): void => setForm((f) => ({ ...f, ...p }))
+  const patch = (p: Partial<AccountFormState>): void => setForm((f) => ({ ...f, ...p }))
 
   const configFromForm = (): Omit<AccountConfig, 'id'> => ({
     displayName: form.displayName || form.email,
@@ -44,7 +44,8 @@ export function AccountSetupDialog(): JSX.Element | null {
     smtpHost: form.smtpHost,
     smtpPort: Number(form.smtpPort),
     smtpSecure: form.smtpSecure,
-    color: PALETTE[accounts.length % PALETTE.length]
+    color: PALETTE[accounts.length % PALETTE.length],
+    signature: ''
   })
 
   const handleTest = async (): Promise<void> => {
@@ -84,62 +85,7 @@ export function AccountSetupDialog(): JSX.Element | null {
           )}
         </div>
 
-        <div className={styles.section}>
-          <div className={styles.row}>
-            <label>Name</label>
-            <input value={form.displayName} onChange={(e) => patch({ displayName: e.target.value })} placeholder="Your Name" />
-          </div>
-          <div className={styles.row}>
-            <label>Email</label>
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => patch({ email: e.target.value })}
-              placeholder="you@example.com"
-              required
-            />
-          </div>
-          <div className={styles.row}>
-            <label>Username</label>
-            <input value={form.username} onChange={(e) => patch({ username: e.target.value })} placeholder="Defaults to email" />
-          </div>
-          <div className={styles.row}>
-            <label>Password</label>
-            <input type="password" value={form.password} onChange={(e) => patch({ password: e.target.value })} required />
-          </div>
-        </div>
-
-        <div className={styles.sectionTitle}>Incoming Mail Server (IMAP)</div>
-        <div className={styles.section}>
-          <div className={styles.row}>
-            <label>Host</label>
-            <input value={form.imapHost} onChange={(e) => patch({ imapHost: e.target.value })} placeholder="imap.example.com" required />
-          </div>
-          <div className={styles.row}>
-            <label>Port</label>
-            <input type="number" value={form.imapPort} onChange={(e) => patch({ imapPort: Number(e.target.value) })} />
-            <label className={styles.inlineCheck}>
-              <input type="checkbox" checked={form.imapSecure} onChange={(e) => patch({ imapSecure: e.target.checked })} />
-              Use SSL
-            </label>
-          </div>
-        </div>
-
-        <div className={styles.sectionTitle}>Outgoing Mail Server (SMTP)</div>
-        <div className={styles.section}>
-          <div className={styles.row}>
-            <label>Host</label>
-            <input value={form.smtpHost} onChange={(e) => patch({ smtpHost: e.target.value })} placeholder="smtp.example.com" required />
-          </div>
-          <div className={styles.row}>
-            <label>Port</label>
-            <input type="number" value={form.smtpPort} onChange={(e) => patch({ smtpPort: Number(e.target.value) })} />
-            <label className={styles.inlineCheck}>
-              <input type="checkbox" checked={form.smtpSecure} onChange={(e) => patch({ smtpSecure: e.target.checked })} />
-              Use SSL
-            </label>
-          </div>
-        </div>
+        <AccountFormFields form={form} patch={patch} passwordRequired />
 
         {testResult && (
           <div className={testResult.ok ? styles.testOk : styles.testError}>

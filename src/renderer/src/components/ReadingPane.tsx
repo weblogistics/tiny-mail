@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import type { MessageAddress } from '@shared/types'
 import { sanitizeMessageHtml } from '../utils/sanitizeHtml'
@@ -28,6 +28,7 @@ export function ReadingPane(): JSX.Element {
   const messagesByKey = useMailStore((s) => s.messagesByKey)
   const searchResults = useMailStore((s) => s.searchResults)
   const bodyCache = useMailStore((s) => s.bodyCache)
+  const settings = useMailStore((s) => s.settings)
   const [allowRemoteImages, setAllowRemoteImages] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
@@ -36,6 +37,13 @@ export function ReadingPane(): JSX.Element {
   const message = list.find((m) => m.uid === selectedUid)
   const bodyKey = selectedAccountId && selectedMailboxPath && selectedUid != null ? `${selectedAccountId}::${selectedMailboxPath}::${selectedUid}` : null
   const body = bodyKey ? bodyCache[bodyKey] : undefined
+
+  // Reset to the user's default for each newly-opened message rather than
+  // leaving remote images permanently unblocked after the first "Load
+  // Remote Content" click of the session.
+  useEffect(() => {
+    setAllowRemoteImages(settings?.loadRemoteImagesByDefault ?? false)
+  }, [bodyKey, settings?.loadRemoteImagesByDefault])
 
   const sanitized = useMemo(() => {
     if (!body?.html) return null

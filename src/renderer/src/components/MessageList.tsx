@@ -87,6 +87,11 @@ export function MessageList(): JSX.Element {
                 e.preventDefault()
                 setMenu({ x: e.clientX, y: e.clientY, msg })
               }}
+              draggable={!searchResults}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/tiny-mail-uid', String(msg.uid))
+              }}
             >
               <span className={styles.dotColumn}>{!msg.flags.seen && <span className={styles.unreadDot} />}</span>
               <span className={styles.main}>
