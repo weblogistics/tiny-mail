@@ -1,5 +1,8 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { ImapFlow } from 'imapflow'
+import { statSync } from 'fs'
+import { basename } from 'path'
+import mime from 'mime-types'
 import { IpcChannels } from '@shared/ipc'
 import type { AccountConfig, ComposeDraft, MailEventPayload, MessageSummary } from '@shared/types'
 import type { AccountStore } from '../accounts/accountStore'
@@ -122,6 +125,19 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.ComposeSend, async (_e, draft: ComposeDraft) => {
     await smtpService.send(draft)
+
+    // Most SMTP servers don't automatically save a copy of what they relay,
+    // so (like every real mail client) we append one to Sent ourselves.
+    try {
+      const mailboxes = imapService.getCachedMailboxes(draft.accountId)
+      const sentBox = mailboxes.find((m) => m.specialUse === 'Sent')?.path ?? 'Sent'
+      const raw = await smtpService.buildMime(draft)
+      await imapService.appendMessage(draft.accountId, sentBox, raw, ['\\Seen'])
+    } catch (err) {
+      // The message was already sent successfully; failing to file the Sent
+      // copy shouldn't be reported to the user as a failed send.
+      console.error('[compose:send] failed to save Sent copy', err)
+    }
   })
 
   ipcMain.handle(IpcChannels.ComposeSaveDraft, async (_e, draft: ComposeDraft) => {
@@ -129,6 +145,20 @@ export function registerIpcHandlers(
     const draftsBox = mailboxes.find((m) => m.specialUse === 'Drafts')?.path ?? 'Drafts'
     const raw = await smtpService.buildMime(draft)
     await imapService.appendMessage(draft.accountId, draftsBox, raw, ['\\Draft'])
+  })
+
+  ipcMain.handle(IpcChannels.ComposePickAttachments, async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const result = win
+      ? await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] })
+      : await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] })
+    if (result.canceled) return []
+    return result.filePaths.map((path) => ({
+      filename: basename(path),
+      path,
+      contentType: mime.lookup(path) || 'application/octet-stream',
+      size: statSync(path).size
+    }))
   })
 
   ipcMain.handle(IpcChannels.WindowMinimize, (e) => {

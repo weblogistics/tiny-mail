@@ -1,0 +1,88 @@
+import { useEffect } from 'react'
+import { useMailStore } from '../store/useMailStore'
+import { buildForwardSeed, buildReplySeed } from '../utils/quote'
+
+function isTypingTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable
+}
+
+export function useKeyboardShortcuts(): void {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      const mod = e.ctrlKey || e.metaKey
+      const state = useMailStore.getState()
+
+      // Escape always works, even while typing, to back out of compose/dialogs.
+      if (e.key === 'Escape') {
+        if (state.compose) {
+          state.closeCompose()
+          e.preventDefault()
+        } else if (state.isAccountDialogOpen && state.accounts.length > 0) {
+          state.setAccountDialogOpen(false)
+          e.preventDefault()
+        }
+        return
+      }
+
+      if (isTypingTarget(e.target)) return
+
+      const key = state.selectedAccountId && state.selectedMailboxPath ? `${state.selectedAccountId}::${state.selectedMailboxPath}` : null
+      const list = state.searchResults ?? (key ? state.messagesByKey[key] ?? [] : [])
+      const selected = list.find((m) => m.uid === state.selectedUid)
+      const bodyKey = key && state.selectedUid != null ? `${key}::${state.selectedUid}` : null
+      const body = bodyKey ? state.bodyCache[bodyKey] : undefined
+
+      if (mod && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        state.openCompose('new')
+        return
+      }
+
+      if (mod && e.key.toLowerCase() === 'f' && !e.shiftKey) {
+        e.preventDefault()
+        document.querySelector<HTMLInputElement>('input[placeholder="Search"]')?.focus()
+        return
+      }
+
+      if (mod && e.key.toLowerCase() === 'r' && selected) {
+        e.preventDefault()
+        const all = e.shiftKey
+        const selfEmail = state.accounts.find((a) => a.id === state.selectedAccountId)?.email
+        state.openCompose(all ? 'replyAll' : 'reply', buildReplySeed(selected, body, selfEmail, all))
+        return
+      }
+
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'f' && selected) {
+        e.preventDefault()
+        state.openCompose('forward', buildForwardSeed(selected, body))
+        return
+      }
+
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'u' && state.selectedUid != null && selected) {
+        e.preventDefault()
+        state.setFlags(state.selectedUid, { seen: !selected.flags.seen })
+        return
+      }
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedUid != null) {
+        e.preventDefault()
+        state.deleteMessage(state.selectedUid)
+        return
+      }
+
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && list.length > 0) {
+        e.preventDefault()
+        const idx = list.findIndex((m) => m.uid === state.selectedUid)
+        const nextIdx =
+          idx < 0 ? 0 : e.key === 'ArrowDown' ? Math.min(list.length - 1, idx + 1) : Math.max(0, idx - 1)
+        state.selectMessage(list[nextIdx].uid)
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+}

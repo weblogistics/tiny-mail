@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import { TrafficLights } from './TrafficLights'
+import { buildForwardSeed, buildReplySeed } from '../utils/quote'
 import {
   IconArchive,
   IconCompose,
   IconFlagOutline,
   IconForward,
   IconGetMail,
+  IconJunk,
   IconReply,
   IconReplyAll,
   IconSearch,
@@ -21,28 +23,43 @@ export function Toolbar(): JSX.Element {
   const selectedMailboxPath = useMailStore((s) => s.selectedMailboxPath)
   const selectedUid = useMailStore((s) => s.selectedUid)
   const mailboxesByAccount = useMailStore((s) => s.mailboxesByAccount)
+  const accounts = useMailStore((s) => s.accounts)
   const searchQuery = useMailStore((s) => s.searchQuery)
   const search = useMailStore((s) => s.search)
   const clearSearch = useMailStore((s) => s.clearSearch)
   const refreshMailboxes = useMailStore((s) => s.refreshMailboxes)
+  const syncSelectedMailbox = useMailStore((s) => s.syncSelectedMailbox)
   const deleteMessage = useMailStore((s) => s.deleteMessage)
   const moveMessage = useMailStore((s) => s.moveMessage)
   const setFlags = useMailStore((s) => s.setFlags)
   const openCompose = useMailStore((s) => s.openCompose)
   const messagesByKey = useMailStore((s) => s.messagesByKey)
+  const bodyCache = useMailStore((s) => s.bodyCache)
 
   const hasSelection = selectedUid != null
   const selectedMessage =
     selectedAccountId && selectedMailboxPath && selectedUid != null
       ? messagesByKey[`${selectedAccountId}::${selectedMailboxPath}`]?.find((m) => m.uid === selectedUid)
       : undefined
+  const selectedBody =
+    selectedAccountId && selectedMailboxPath && selectedUid != null
+      ? bodyCache[`${selectedAccountId}::${selectedMailboxPath}::${selectedUid}`]
+      : undefined
+  const selfEmail = accounts.find((a) => a.id === selectedAccountId)?.email.toLowerCase()
 
   const boxes = selectedAccountId ? mailboxesByAccount[selectedAccountId] ?? [] : []
   const archiveBox = boxes.find((b) => b.specialUse === 'Archive')
+  const junkBox = boxes.find((b) => b.specialUse === 'Junk')
 
-  const replyTo = selectedMessage
-    ? { to: selectedMessage.from.map((a) => a.address).join(', '), subject: `Re: ${selectedMessage.subject}`.replace(/^Re: Re: /, 'Re: ') }
-    : null
+  const handleReply = (all: boolean): void => {
+    if (!selectedMessage) return
+    openCompose(all ? 'replyAll' : 'reply', buildReplySeed(selectedMessage, selectedBody, selfEmail, all))
+  }
+
+  const handleForward = (): void => {
+    if (!selectedMessage) return
+    openCompose('forward', buildForwardSeed(selectedMessage, selectedBody))
+  }
 
   return (
     <div className={`${styles.toolbar} drag-region`}>
@@ -60,7 +77,11 @@ export function Toolbar(): JSX.Element {
         <button
           className={styles.iconButton}
           title="Get Mail"
-          onClick={() => selectedAccountId && refreshMailboxes(selectedAccountId)}
+          onClick={() => {
+            if (!selectedAccountId) return
+            refreshMailboxes(selectedAccountId)
+            syncSelectedMailbox()
+          }}
         >
           <IconGetMail />
         </button>
@@ -80,31 +101,29 @@ export function Toolbar(): JSX.Element {
         >
           <IconArchive />
         </button>
+        <button
+          className={styles.iconButton}
+          title="Move to Junk"
+          disabled={!hasSelection || !junkBox}
+          onClick={() => selectedUid != null && junkBox && moveMessage(selectedUid, junkBox.path)}
+        >
+          <IconJunk />
+        </button>
       </div>
 
       <div className={`${styles.group} no-drag`}>
-        <button
-          className={styles.iconButton}
-          title="Reply"
-          disabled={!hasSelection}
-          onClick={() => replyTo && openCompose('reply', { to: replyTo.to, subject: replyTo.subject })}
-        >
+        <button className={styles.iconButton} title="Reply" disabled={!hasSelection} onClick={() => handleReply(false)}>
           <IconReply />
         </button>
         <button
           className={styles.iconButton}
           title="Reply All"
           disabled={!hasSelection}
-          onClick={() => replyTo && openCompose('replyAll', { to: replyTo.to, subject: replyTo.subject })}
+          onClick={() => handleReply(true)}
         >
           <IconReplyAll />
         </button>
-        <button
-          className={styles.iconButton}
-          title="Forward"
-          disabled={!hasSelection}
-          onClick={() => selectedMessage && openCompose('forward', { subject: `Fwd: ${selectedMessage.subject}` })}
-        >
+        <button className={styles.iconButton} title="Forward" disabled={!hasSelection} onClick={handleForward}>
           <IconForward />
         </button>
       </div>

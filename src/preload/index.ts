@@ -30,7 +30,8 @@ const api: TinyMailApi = {
   },
   compose: {
     send: (draft) => ipcRenderer.invoke(IpcChannels.ComposeSend, draft),
-    saveDraft: (draft) => ipcRenderer.invoke(IpcChannels.ComposeSaveDraft, draft)
+    saveDraft: (draft) => ipcRenderer.invoke(IpcChannels.ComposeSaveDraft, draft),
+    pickAttachments: () => ipcRenderer.invoke(IpcChannels.ComposePickAttachments)
   },
   events: {
     subscribe: (listener) => {

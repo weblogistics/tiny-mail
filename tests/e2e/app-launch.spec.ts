@@ -40,11 +40,11 @@ test('Add Account submit is disabled until required fields are filled', async ()
 test('visual regression: full window light mode', async () => {
   const { window } = launched
   await window.emulateMedia({ colorScheme: 'light' })
-  await expect(window).toHaveScreenshot('app-shell-light.png', { maxDiffPixelRatio: 0.02 })
+  await expect(window).toHaveScreenshot('app-shell-light.png', { maxDiffPixelRatio: 0.002 })
 })
 
 test('visual regression: full window dark mode', async () => {
   const { window } = launched
   await window.emulateMedia({ colorScheme: 'dark' })
-  await expect(window).toHaveScreenshot('app-shell-dark.png', { maxDiffPixelRatio: 0.02 })
+  await expect(window).toHaveScreenshot('app-shell-dark.png', { maxDiffPixelRatio: 0.002 })
 })

@@ -18,6 +18,7 @@ export const IpcChannels = {
 
   ComposeSend: 'compose:send',
   ComposeSaveDraft: 'compose:save-draft',
+  ComposePickAttachments: 'compose:pick-attachments',
 
   WindowMinimize: 'window:minimize',
   WindowToggleMaximize: 'window:toggle-maximize',

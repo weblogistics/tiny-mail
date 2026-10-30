@@ -192,6 +192,7 @@ export class ImapService {
           subject: msg.envelope?.subject || '(no subject)',
           from: toAddresses(msg.envelope?.from),
           to: toAddresses(msg.envelope?.to),
+          cc: toAddresses(msg.envelope?.cc),
           date: (msg.envelope?.date || new Date()).toISOString(),
           flags: {
             seen: msg.flags?.has('\\Seen') ?? false,

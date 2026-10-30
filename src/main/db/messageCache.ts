@@ -24,13 +24,13 @@ export function upsertMessage(msg: MessageSummary): void {
   getDb()
     .prepare(
       `INSERT INTO messages
-         (accountId, mailboxPath, uid, messageId, subject, fromJson, toJson, date,
+         (accountId, mailboxPath, uid, messageId, subject, fromJson, toJson, ccJson, date,
           seen, flagged, answered, draft, deleted, hasAttachments, snippet)
        VALUES
-         (@accountId, @mailboxPath, @uid, @messageId, @subject, @fromJson, @toJson, @date,
+         (@accountId, @mailboxPath, @uid, @messageId, @subject, @fromJson, @toJson, @ccJson, @date,
           @seen, @flagged, @answered, @draft, @deleted, @hasAttachments, @snippet)
        ON CONFLICT(accountId, mailboxPath, uid) DO UPDATE SET
-         messageId=@messageId, subject=@subject, fromJson=@fromJson, toJson=@toJson, date=@date,
+         messageId=@messageId, subject=@subject, fromJson=@fromJson, toJson=@toJson, ccJson=@ccJson, date=@date,
          seen=@seen, flagged=@flagged, answered=@answered, draft=@draft, deleted=@deleted,
          hasAttachments=@hasAttachments, snippet=@snippet`
     )
@@ -42,6 +42,7 @@ export function upsertMessage(msg: MessageSummary): void {
       subject: msg.subject,
       fromJson: JSON.stringify(msg.from),
       toJson: JSON.stringify(msg.to),
+      ccJson: JSON.stringify(msg.cc),
       date: msg.date,
       seen: msg.flags.seen ? 1 : 0,
       flagged: msg.flags.flagged ? 1 : 0,
@@ -61,6 +62,7 @@ interface MessageRow {
   subject: string
   fromJson: string
   toJson: string
+  ccJson: string
   date: string
   seen: number
   flagged: number
@@ -80,6 +82,7 @@ function rowToSummary(r: MessageRow): MessageSummary {
     subject: r.subject,
     from: JSON.parse(r.fromJson),
     to: JSON.parse(r.toJson),
+    cc: JSON.parse(r.ccJson || '[]'),
     date: r.date,
     flags: {
       seen: !!r.seen,

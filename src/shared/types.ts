@@ -51,6 +51,7 @@ export interface MessageSummary {
   subject: string
   from: MessageAddress[]
   to: MessageAddress[]
+  cc: MessageAddress[]
   date: string
   flags: MessageFlags
   hasAttachments: boolean
@@ -84,7 +85,14 @@ export interface ComposeDraft {
   html: string
   inReplyTo?: string
   references?: string
-  attachments: { filename: string; contentType: string; path: string }[]
+  attachments: ComposeAttachment[]
+}
+
+export interface ComposeAttachment {
+  filename: string
+  contentType: string
+  path: string
+  size: number
 }
 
 export interface SyncProgress {

@@ -1,7 +1,13 @@
 import { useRef, useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
-import { IconClose } from './Icons'
+import { IconClose, IconPaperclip } from './Icons'
 import styles from './ComposeWindow.module.css'
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
 
 export function ComposeWindow(): JSX.Element | null {
   const compose = useMailStore((s) => s.compose)
@@ -27,6 +33,16 @@ export function ComposeWindow(): JSX.Element | null {
     } finally {
       setSending(false)
     }
+  }
+
+  const handleAttach = async (): Promise<void> => {
+    const picked = await window.api.compose.pickAttachments()
+    if (picked.length === 0) return
+    updateCompose({ attachments: [...compose.draft.attachments, ...picked] })
+  }
+
+  const removeAttachment = (path: string): void => {
+    updateCompose({ attachments: compose.draft.attachments.filter((a) => a.path !== path) })
   }
 
   return (
@@ -73,6 +89,25 @@ export function ComposeWindow(): JSX.Element | null {
           </div>
         </div>
 
+        {compose.draft.attachments.length > 0 && (
+          <div className={styles.attachments}>
+            {compose.draft.attachments.map((a) => (
+              <div key={a.path} className={styles.attachmentChip}>
+                <IconPaperclip width={12} height={12} />
+                <span className={styles.attachmentName}>{a.filename}</span>
+                <span className={styles.attachmentSize}>{formatBytes(a.size)}</span>
+                <button
+                  className={styles.attachmentRemove}
+                  onClick={() => removeAttachment(a.path)}
+                  aria-label={`Remove ${a.filename}`}
+                >
+                  <IconClose width={9} height={9} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div
           ref={bodyRef}
           className={styles.body}
@@ -82,6 +117,10 @@ export function ComposeWindow(): JSX.Element | null {
         />
 
         <div className={styles.footer}>
+          <button className={styles.attachButton} title="Attach File" onClick={handleAttach}>
+            <IconPaperclip width={15} height={15} />
+          </button>
+          <div className={styles.footerSpacer} />
           <button
             className={styles.sendButton}
             disabled={sending || !compose.draft.to.trim()}

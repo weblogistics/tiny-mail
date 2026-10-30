@@ -1,5 +1,6 @@
 import type {
   AccountConfig,
+  ComposeAttachment,
   ComposeDraft,
   MailboxSummary,
   MailEventPayload,
@@ -39,6 +40,7 @@ export interface TinyMailApi {
   compose: {
     send(draft: ComposeDraft): Promise<void>
     saveDraft(draft: ComposeDraft): Promise<void>
+    pickAttachments(): Promise<ComposeAttachment[]>
   }
   events: {
     subscribe(listener: (payload: MailEventPayload) => void): () => void

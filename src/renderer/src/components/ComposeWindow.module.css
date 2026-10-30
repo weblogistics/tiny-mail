@@ -106,11 +106,75 @@
   color: var(--text-primary);
 }
 
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.attachmentChip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--list-bg-alt);
+  border: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.attachmentName {
+  font-weight: 500;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentSize {
+  color: var(--text-tertiary);
+}
+
+.attachmentRemove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  color: var(--text-secondary);
+}
+
+.attachmentRemove:hover {
+  background: rgba(128, 128, 128, 0.25);
+}
+
 .footer {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   padding: 10px 14px;
   border-top: 1px solid var(--border);
+}
+
+.attachButton {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.attachButton:hover {
+  background: var(--list-bg-alt);
+}
+
+.footerSpacer {
+  flex: 1;
 }
 
 .sendButton {

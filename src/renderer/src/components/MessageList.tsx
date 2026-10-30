@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import type { MessageSummary } from '@shared/types'
 import { IconFlagFilled, IconPaperclip } from './Icons'
 import { formatMessageDate } from '../utils/formatDate'
+import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import styles from './MessageList.module.css'
 
 function senderLabel(msg: MessageSummary): string {
@@ -19,11 +21,50 @@ export function MessageList(): JSX.Element {
   const searchQuery = useMailStore((s) => s.searchQuery)
   const syncStatus = useMailStore((s) => s.syncStatus)
   const selectMessage = useMailStore((s) => s.selectMessage)
+  const setFlags = useMailStore((s) => s.setFlags)
+  const moveMessage = useMailStore((s) => s.moveMessage)
+  const deleteMessage = useMailStore((s) => s.deleteMessage)
+  const mailboxesByAccount = useMailStore((s) => s.mailboxesByAccount)
+  const [menu, setMenu] = useState<{ x: number; y: number; msg: MessageSummary } | null>(null)
 
   const key = selectedAccountId && selectedMailboxPath ? `${selectedAccountId}::${selectedMailboxPath}` : null
   const messages = searchResults ?? (key ? messagesByKey[key] ?? [] : [])
   const sync = key ? syncStatus[key] : undefined
   const syncing = sync && !sync.done
+
+  const boxes = selectedAccountId ? mailboxesByAccount[selectedAccountId] ?? [] : []
+  const archiveBox = boxes.find((b) => b.specialUse === 'Archive')
+  const junkBox = boxes.find((b) => b.specialUse === 'Junk')
+
+  const menuItems: ContextMenuItem[] = menu
+    ? [
+        {
+          label: menu.msg.flags.seen ? 'Mark as Unread' : 'Mark as Read',
+          onSelect: () => setFlags(menu.msg.uid, { seen: !menu.msg.flags.seen })
+        },
+        {
+          label: menu.msg.flags.flagged ? 'Remove Flag' : 'Flag',
+          onSelect: () => setFlags(menu.msg.uid, { flagged: !menu.msg.flags.flagged })
+        },
+        {
+          label: 'Move to Archive',
+          disabled: !archiveBox,
+          onSelect: () => archiveBox && moveMessage(menu.msg.uid, archiveBox.path),
+          separatorBefore: true
+        },
+        {
+          label: 'Move to Junk',
+          disabled: !junkBox,
+          onSelect: () => junkBox && moveMessage(menu.msg.uid, junkBox.path)
+        },
+        {
+          label: 'Delete',
+          danger: true,
+          onSelect: () => deleteMessage(menu.msg.uid),
+          separatorBefore: true
+        }
+      ]
+    : []
 
   return (
     <div className={styles.list}>
@@ -42,6 +83,10 @@ export function MessageList(): JSX.Element {
               key={msg.uid}
               className={`${styles.row} ${active ? styles.active : ''} ${!msg.flags.seen ? styles.unread : ''}`}
               onClick={() => selectMessage(msg.uid)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setMenu({ x: e.clientX, y: e.clientY, msg })
+              }}
             >
               <span className={styles.dotColumn}>{!msg.flags.seen && <span className={styles.unreadDot} />}</span>
               <span className={styles.main}>
@@ -60,6 +105,7 @@ export function MessageList(): JSX.Element {
           )
         })}
       </div>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
     </div>
   )
 }

@@ -34,6 +34,7 @@ export function getDb(): Database.Database {
       subject TEXT,
       fromJson TEXT,
       toJson TEXT,
+      ccJson TEXT DEFAULT '[]',
       date TEXT,
       seen INTEGER DEFAULT 0,
       flagged INTEGER DEFAULT 0,
@@ -57,6 +58,13 @@ export function getDb(): Database.Database {
       PRIMARY KEY (accountId, mailboxPath, uid)
     );
   `)
+
+  // ccJson was added after the initial release; backfill it for anyone
+  // upgrading from a cache file created before this column existed.
+  const columns = db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[]
+  if (!columns.some((c) => c.name === 'ccJson')) {
+    db.exec(`ALTER TABLE messages ADD COLUMN ccJson TEXT DEFAULT '[]'`)
+  }
 
   return db
 }

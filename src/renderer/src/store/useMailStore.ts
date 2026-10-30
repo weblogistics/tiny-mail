@@ -12,6 +12,22 @@ function key(accountId: string, mailboxPath: string): string {
   return `${accountId}::${mailboxPath}`
 }
 
+type SetFn = (
+  partial: Partial<MailState> | ((state: MailState) => Partial<MailState>)
+) => void
+
+function adjustUnreadCount(set: SetFn, accountId: string, mailboxPath: string, delta: number): void {
+  set((s) => {
+    const boxes = s.mailboxesByAccount[accountId]
+    if (!boxes) return {}
+    const idx = boxes.findIndex((b) => b.path === mailboxPath)
+    if (idx < 0) return {}
+    const next = [...boxes]
+    next[idx] = { ...next[idx], unreadCount: Math.max(0, next[idx].unreadCount + delta) }
+    return { mailboxesByAccount: { ...s.mailboxesByAccount, [accountId]: next } }
+  })
+}
+
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward'
 
 interface ComposeState {
@@ -48,6 +64,7 @@ interface MailState {
   init(): Promise<void>
   selectAccount(accountId: string): Promise<void>
   selectMailbox(mailboxPath: string): Promise<void>
+  syncSelectedMailbox(): Promise<void>
   selectMessage(uid: number): Promise<void>
   refreshMailboxes(accountId: string): Promise<void>
   addAccount(config: Omit<AccountConfig, 'id'>, password: string): Promise<void>
@@ -131,6 +148,13 @@ export const useMailStore = create<MailState>((set, get) => ({
     window.api.mail.sync(accountId, mailboxPath).catch(() => void 0)
   },
 
+  async syncSelectedMailbox() {
+    const accountId = get().selectedAccountId
+    const mailboxPath = get().selectedMailboxPath
+    if (!accountId || !mailboxPath) return
+    await window.api.mail.sync(accountId, mailboxPath)
+  },
+
   async selectMessage(uid) {
     const accountId = get().selectedAccountId
     const mailboxPath = get().selectedMailboxPath
@@ -174,12 +198,19 @@ export const useMailStore = create<MailState>((set, get) => ({
     const mailboxPath = get().selectedMailboxPath
     if (!accountId || !mailboxPath) return
     const k = key(accountId, mailboxPath)
+    const before = get().messagesByKey[k]?.find((m) => m.uid === uid)
+
     set((s) => ({
       messagesByKey: {
         ...s.messagesByKey,
         [k]: (s.messagesByKey[k] ?? []).map((m) => (m.uid === uid ? { ...m, flags: { ...m.flags, ...flags } } : m))
       }
     }))
+
+    if (before && typeof flags.seen === 'boolean' && flags.seen !== before.flags.seen) {
+      adjustUnreadCount(set, accountId, mailboxPath, flags.seen ? -1 : 1)
+    }
+
     await window.api.messages.setFlags(accountId, mailboxPath, uid, flags)
   },
 
@@ -188,10 +219,17 @@ export const useMailStore = create<MailState>((set, get) => ({
     const mailboxPath = get().selectedMailboxPath
     if (!accountId || !mailboxPath) return
     const k = key(accountId, mailboxPath)
+    const moved = get().messagesByKey[k]?.find((m) => m.uid === uid)
+
     set((s) => ({
       messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).filter((m) => m.uid !== uid) },
       selectedUid: s.selectedUid === uid ? null : s.selectedUid
     }))
+
+    if (moved && !moved.flags.seen) {
+      adjustUnreadCount(set, accountId, mailboxPath, -1)
+    }
+
     await window.api.messages.move(accountId, mailboxPath, uid, destPath)
   },
 
@@ -206,10 +244,17 @@ export const useMailStore = create<MailState>((set, get) => ({
       return
     }
     const k = key(accountId, mailboxPath)
+    const removed = get().messagesByKey[k]?.find((m) => m.uid === uid)
+
     set((s) => ({
       messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).filter((m) => m.uid !== uid) },
       selectedUid: s.selectedUid === uid ? null : s.selectedUid
     }))
+
+    if (removed && !removed.flags.seen) {
+      adjustUnreadCount(set, accountId, mailboxPath, -1)
+    }
+
     await window.api.messages.delete(accountId, mailboxPath, uid)
   },
 
