@@ -13,3 +13,5 @@ screenshots/actual
 screenshots/diff
 *.sqlite
 *.sqlite-journal
+*.tsbuildinfo
+scratch-*

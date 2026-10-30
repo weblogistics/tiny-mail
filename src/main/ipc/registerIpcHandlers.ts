@@ -4,7 +4,7 @@ import { IpcChannels } from '@shared/ipc'
 import type { AccountConfig, ComposeDraft, MailEventPayload, MessageSummary } from '@shared/types'
 import type { AccountStore } from '../accounts/accountStore'
 import type { ImapService } from '../imap/imapService'
-import type { SmtpService } from '../smtp/smtpService'
+import { verifySmtpConfig, type SmtpService } from '../smtp/smtpService'
 import { searchMessages } from '../db/messageCache'
 
 export function broadcast(payload: MailEventPayload): void {
@@ -48,13 +48,20 @@ export function registerIpcHandlers(
         auth: { user: config.username, pass: password },
         logger: false
       })
+      let imapResult: { ok: true } | { ok: false; error: string }
       try {
         await client.connect()
         await client.logout()
-        return { ok: true as const }
+        imapResult = { ok: true }
       } catch (err) {
-        return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+        imapResult = { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
+      if (!imapResult.ok) return { ok: false as const, error: `IMAP: ${imapResult.error}` }
+
+      const smtpResult = await verifySmtpConfig(config, password)
+      if (!smtpResult.ok) return { ok: false as const, error: `SMTP: ${smtpResult.error}` }
+
+      return { ok: true as const }
     }
   )
 
@@ -77,7 +84,12 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle(IpcChannels.MailSync, async (_e, accountId: string, mailboxPath: string) => {
-    await imapService.syncMailbox(accountId, mailboxPath)
+    try {
+      await imapService.syncMailbox(accountId, mailboxPath)
+    } catch (err) {
+      console.error('[mail:sync] failed', accountId, mailboxPath, err)
+      throw err
+    }
   })
 
   ipcMain.handle(

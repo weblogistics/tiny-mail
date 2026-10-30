@@ -22,6 +22,11 @@ function mailboxIcon(mb: MailboxSummary): JSX.Element {
   }
 }
 
+function displayName(mb: MailboxSummary): string {
+  if (mb.specialUse === 'Inbox') return 'Inbox'
+  return mb.name
+}
+
 const SPECIAL_ORDER: Record<string, number> = {
   Inbox: 0,
   Drafts: 1,
@@ -77,7 +82,7 @@ export function Sidebar(): JSX.Element {
                         }}
                       >
                         <span className={styles.mailboxIcon}>{mailboxIcon(mb)}</span>
-                        <span className={styles.mailboxName}>{mb.name}</span>
+                        <span className={styles.mailboxName}>{displayName(mb)}</span>
                         {mb.unreadCount > 0 && (
                           <span className={`${styles.badge} ${active ? styles.badgeActive : ''}`}>{mb.unreadCount}</span>
                         )}

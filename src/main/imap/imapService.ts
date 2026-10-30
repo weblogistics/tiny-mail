@@ -38,6 +38,24 @@ function toAddresses(list?: { name?: string; address?: string }[]): MessageAddre
   return list.map((a) => ({ name: a.name || '', address: a.address || '' }))
 }
 
+// Many self-hosted/smaller IMAP servers don't advertise RFC 6154 SPECIAL-USE
+// flags, so fall back to recognizing common folder names.
+const NAME_FALLBACK_PATTERNS: [RegExp, SpecialUse][] = [
+  [/^inbox$/i, 'Inbox'],
+  [/^(sent|sent items|sent mail|sent messages)$/i, 'Sent'],
+  [/^(drafts?)$/i, 'Drafts'],
+  [/^(trash|deleted items|deleted messages)$/i, 'Trash'],
+  [/^(junk|spam|bulk mail)$/i, 'Junk'],
+  [/^(archive|all mail)$/i, 'Archive']
+]
+
+function inferSpecialUseFromName(name: string): SpecialUse {
+  for (const [pattern, use] of NAME_FALLBACK_PATTERNS) {
+    if (pattern.test(name)) return use
+  }
+  return null
+}
+
 export class ImapService {
   private clients = new Map<string, ImapFlow>()
 
@@ -95,7 +113,10 @@ export class ImapService {
     const summaries: MailboxSummary[] = []
     for (const mailbox of list) {
       const specialUseRaw = (mailbox.specialUse || '') as string
-      const specialUse = SPECIAL_USE_MAP[specialUseRaw] ?? (mailbox.flags?.has('\\Inbox') ? 'Inbox' : null)
+      const specialUse =
+        SPECIAL_USE_MAP[specialUseRaw] ??
+        (mailbox.flags?.has('\\Inbox') ? 'Inbox' : null) ??
+        inferSpecialUseFromName(mailbox.name)
 
       let unreadCount = 0
       let totalCount = 0
@@ -143,7 +164,19 @@ export class ImapService {
 
       const start = Math.max(1, total - limit + 1)
       const range = `${start}:*`
-      let fetched = 0
+
+      // Phase 1: drain the FETCH command fully before issuing any other
+      // command on this connection. ImapFlow serializes commands on a
+      // connection, so calling client.download() mid-iteration here would
+      // queue behind this still-open FETCH and deadlock forever (fetch is
+      // waiting to be iterated further, download is waiting for fetch to
+      // finish) with no error or timeout.
+      interface PendingMessage {
+        uid: number
+        summary: MessageSummary
+        snippetPartId: string | null
+      }
+      const pending: PendingMessage[] = []
 
       for await (const msg of client.fetch(
         range,
@@ -151,27 +184,6 @@ export class ImapService {
         { uid: false }
       )) {
         const { hasAttachments, snippetPartId } = analyzeBodyStructure(msg.bodyStructure as never)
-
-        let snippet = ''
-        if (snippetPartId) {
-          try {
-            const { content } = await client.download(String(msg.uid), snippetPartId, {
-              uid: true,
-              maxBytes: 2000
-            })
-            const chunks: Buffer[] = []
-            for await (const chunk of content) chunks.push(chunk as Buffer)
-            snippet = Buffer.concat(chunks)
-              .toString('utf-8')
-              .replace(/<[^>]+>/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim()
-              .slice(0, 220)
-          } catch {
-            snippet = ''
-          }
-        }
-
         const summary: MessageSummary = {
           accountId,
           mailboxPath,
@@ -189,14 +201,40 @@ export class ImapService {
             deleted: msg.flags?.has('\\Deleted') ?? false
           },
           hasAttachments,
-          snippet
+          snippet: ''
         }
+        pending.push({ uid: msg.uid, summary, snippetPartId })
         upsertMessage(summary)
+      }
+
+      // Phase 2: the FETCH command is closed now, so it's safe to issue
+      // DOWNLOAD commands on the same connection to backfill snippets.
+      let fetched = 0
+      for (const item of pending) {
+        if (item.snippetPartId) {
+          try {
+            const { content } = await client.download(String(item.uid), item.snippetPartId, {
+              uid: true,
+              maxBytes: 2000
+            })
+            const chunks: Buffer[] = []
+            for await (const chunk of content) chunks.push(chunk as Buffer)
+            item.summary.snippet = Buffer.concat(chunks)
+              .toString('utf-8')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 220)
+            upsertMessage(item.summary)
+          } catch {
+            // Leave snippet blank; the message itself synced fine.
+          }
+        }
         fetched += 1
         this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched, total, done: false } })
       }
 
-      this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched, total, done: true } })
+      this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: pending.length, total, done: true } })
     } finally {
       lock.release()
     }
