@@ -26,6 +26,15 @@
   color: var(--text-primary);
 }
 
+.inlineSelect {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--list-bg);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
 .hint {
   margin: 6px 0 0 24px;
   font-size: 12px;

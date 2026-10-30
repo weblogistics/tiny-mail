@@ -16,6 +16,8 @@ export default function App(): JSX.Element {
 
   useKeyboardShortcuts()
 
+  const syncIntervalSeconds = useMailStore((s) => s.settings?.syncIntervalSeconds ?? 60)
+
   useEffect(() => {
     // Polling rather than IMAP IDLE: simpler and avoids issuing a second
     // command on a connection that's mid-FETCH (see the sync deadlock fix).
@@ -23,9 +25,9 @@ export default function App(): JSX.Element {
       const state = useMailStore.getState()
       for (const account of state.accounts) state.refreshMailboxes(account.id)
       state.syncSelectedMailbox()
-    }, 60000)
+    }, syncIntervalSeconds * 1000)
     return () => clearInterval(interval)
-  }, [])
+  }, [syncIntervalSeconds])
 
   return (
     <div className="app-shell">

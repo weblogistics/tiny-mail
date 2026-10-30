@@ -61,9 +61,10 @@ interface MailState {
   search(query: string): Promise<void>
   clearSearch(): void
   openCompose(mode: ComposeMode, seed?: Partial<ComposeDraft>): void
-  createMailbox(name: string): Promise<void>
+  createMailbox(name: string, parentPath?: string | null): Promise<void>
   renameMailbox(path: string, newName: string): Promise<void>
   deleteMailbox(path: string): Promise<void>
+  emptyMailbox(path: string): Promise<void>
 }
 
 export const useMailStore = create<MailState>((set, get) => ({
@@ -221,17 +222,37 @@ export const useMailStore = create<MailState>((set, get) => ({
     if (!accountId || !mailboxPath) return
     const k = key(accountId, mailboxPath)
     const moved = get().messagesByKey[k]?.find((m) => m.uid === uid)
+    const wasSelected = get().selectedUid === uid
 
+    // Optimistic removal from the source list — rolled back below if the
+    // server-side move actually fails, instead of just leaving the message
+    // looking vanished (it hadn't actually gone anywhere).
     set((s) => ({
       messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).filter((m) => m.uid !== uid) },
-      selectedUid: s.selectedUid === uid ? null : s.selectedUid
+      selectedUid: wasSelected ? null : s.selectedUid
     }))
-
     if (moved && !moved.flags.seen) {
       adjustUnreadCount(set, accountId, mailboxPath, -1)
     }
 
-    await window.api.messages.move(accountId, mailboxPath, uid, destPath)
+    try {
+      await window.api.messages.move(accountId, mailboxPath, uid, destPath)
+    } catch (err) {
+      if (moved) {
+        set((s) => ({
+          messagesByKey: { ...s.messagesByKey, [k]: [...(s.messagesByKey[k] ?? []), moved] },
+          selectedUid: wasSelected ? uid : s.selectedUid
+        }))
+        if (!moved.flags.seen) adjustUnreadCount(set, accountId, mailboxPath, 1)
+      }
+      window.alert(`Couldn't move that message: ${err instanceof Error ? err.message : String(err)}`)
+      return
+    }
+
+    // The message gets a new UID in the destination mailbox, which we don't
+    // know locally (IMAP MOVE/COPY doesn't hand it back in a form we parse
+    // here) — pull the destination from the server instead of guessing.
+    window.api.mail.sync(accountId, destPath).catch(() => void 0)
   },
 
   async deleteMessage(uid) {
@@ -280,17 +301,25 @@ export const useMailStore = create<MailState>((set, get) => ({
     window.api.compose.openWindow({ accountId, mode, draft: seed ?? {} })
   },
 
-  async createMailbox(name) {
+  async createMailbox(name, parentPath) {
     const accountId = get().selectedAccountId
     if (!accountId || !name.trim()) return
-    await window.api.mailboxes.create(accountId, name.trim())
+    try {
+      await window.api.mailboxes.create(accountId, name.trim(), parentPath)
+    } catch (err) {
+      window.alert(`Couldn't create that mailbox: ${err instanceof Error ? err.message : String(err)}`)
+    }
     await get().refreshMailboxes(accountId)
   },
 
   async renameMailbox(path, newName) {
     const accountId = get().selectedAccountId
     if (!accountId || !newName.trim()) return
-    await window.api.mailboxes.rename(accountId, path, newName.trim())
+    try {
+      await window.api.mailboxes.rename(accountId, path, newName.trim())
+    } catch (err) {
+      window.alert(`Couldn't rename that mailbox: ${err instanceof Error ? err.message : String(err)}`)
+    }
     await get().refreshMailboxes(accountId)
   },
 
@@ -298,7 +327,26 @@ export const useMailStore = create<MailState>((set, get) => ({
     const accountId = get().selectedAccountId
     if (!accountId) return
     if (get().selectedMailboxPath === path) set({ selectedMailboxPath: null, selectedUid: null })
-    await window.api.mailboxes.delete(accountId, path)
+    try {
+      await window.api.mailboxes.delete(accountId, path)
+    } catch (err) {
+      window.alert(`Couldn't delete that mailbox: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    await get().refreshMailboxes(accountId)
+  },
+
+  async emptyMailbox(path) {
+    const accountId = get().selectedAccountId
+    if (!accountId) return
+    try {
+      await window.api.mailboxes.empty(accountId, path)
+    } catch (err) {
+      window.alert(`Couldn't empty that mailbox: ${err instanceof Error ? err.message : String(err)}`)
+      return
+    }
+    if (get().selectedMailboxPath === path) {
+      set((s) => ({ messagesByKey: { ...s.messagesByKey, [key(accountId, path)]: [] }, selectedUid: null }))
+    }
     await get().refreshMailboxes(accountId)
   }
 }))

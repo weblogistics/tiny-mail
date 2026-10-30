@@ -13,10 +13,10 @@ const initialForm: AccountFormState = {
   password: '',
   imapHost: '',
   imapPort: 993,
-  imapSecure: true,
+  imapSecurity: 'ssl',
   smtpHost: '',
-  smtpPort: 465,
-  smtpSecure: true,
+  smtpPort: 587,
+  smtpSecurity: 'starttls',
   signature: ''
 }
 
@@ -40,10 +40,10 @@ export function AccountSetupDialog(): JSX.Element | null {
     username: form.username || form.email,
     imapHost: form.imapHost,
     imapPort: Number(form.imapPort),
-    imapSecure: form.imapSecure,
+    imapSecurity: form.imapSecurity,
     smtpHost: form.smtpHost,
     smtpPort: Number(form.smtpPort),
-    smtpSecure: form.smtpSecure,
+    smtpSecurity: form.smtpSecurity,
     color: PALETTE[accounts.length % PALETTE.length],
     signature: ''
   })

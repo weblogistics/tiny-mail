@@ -1,7 +1,13 @@
-import type { AccountConfig } from '@shared/types'
+import type { AccountConfig, ConnectionSecurity } from '@shared/types'
 import styles from './AccountSetupDialog.module.css'
 
 export type AccountFormState = Omit<AccountConfig, 'id' | 'color'> & { password: string }
+
+const SECURITY_OPTIONS: { value: ConnectionSecurity; label: string }[] = [
+  { value: 'ssl', label: 'SSL/TLS' },
+  { value: 'starttls', label: 'STARTTLS' },
+  { value: 'none', label: 'None' }
+]
 
 interface AccountFormFieldsProps {
   form: AccountFormState
@@ -58,10 +64,17 @@ export function AccountFormFields({
         <div className={styles.row}>
           <label>Port</label>
           <input type="number" value={form.imapPort} onChange={(e) => patch({ imapPort: Number(e.target.value) })} />
-          <label className={styles.inlineCheck}>
-            <input type="checkbox" checked={form.imapSecure} onChange={(e) => patch({ imapSecure: e.target.checked })} />
-            Use SSL
-          </label>
+          <select
+            className={styles.securitySelect}
+            value={form.imapSecurity}
+            onChange={(e) => patch({ imapSecurity: e.target.value as ConnectionSecurity })}
+          >
+            {SECURITY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -74,10 +87,17 @@ export function AccountFormFields({
         <div className={styles.row}>
           <label>Port</label>
           <input type="number" value={form.smtpPort} onChange={(e) => patch({ smtpPort: Number(e.target.value) })} />
-          <label className={styles.inlineCheck}>
-            <input type="checkbox" checked={form.smtpSecure} onChange={(e) => patch({ smtpSecure: e.target.checked })} />
-            Use SSL
-          </label>
+          <select
+            className={styles.securitySelect}
+            value={form.smtpSecurity}
+            onChange={(e) => patch({ smtpSecurity: e.target.value as ConnectionSecurity })}
+          >
+            {SECURITY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
     </>

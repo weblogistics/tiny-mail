@@ -2,10 +2,32 @@ import { app, safeStorage } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { randomUUID } from 'crypto'
-import type { AccountConfig } from '@shared/types'
+import type { AccountConfig, ConnectionSecurity } from '@shared/types'
 
 interface StoredAccount extends AccountConfig {
   encryptedPassword: string // base64
+}
+
+// Pre-dates the 'ssl' | 'starttls' | 'none' security enum, back when it was
+// just an "Use SSL" checkbox whose meaning for SMTP depended on the port.
+interface LegacyStoredAccount {
+  imapSecure?: boolean
+  imapSecurity?: ConnectionSecurity
+  smtpPort?: number
+  smtpSecure?: boolean
+  smtpSecurity?: ConnectionSecurity
+}
+
+function migrateSecurity(a: StoredAccount & LegacyStoredAccount): StoredAccount {
+  // Old behavior: SMTP only used implicit TLS on port 465; any other port
+  // upgraded via STARTTLS when "Use SSL" was checked (and opportunistically
+  // even when it wasn't, since nodemailer/imapflow try STARTTLS by default
+  // when not told to use implicit TLS) — so 'starttls' is the closest
+  // equivalent for every case except "465 and checked".
+  const imapSecurity = a.imapSecurity ?? (a.imapSecure ? 'ssl' : 'starttls')
+  const smtpSecurity = a.smtpSecurity ?? (a.smtpSecure && a.smtpPort === 465 ? 'ssl' : 'starttls')
+  const { imapSecure: _is, smtpSecure: _ss, ...rest } = a
+  return { ...rest, imapSecurity, smtpSecurity }
 }
 
 export class AccountStore {
@@ -26,10 +48,12 @@ export class AccountStore {
     }
     try {
       const raw = readFileSync(this.filePath, 'utf-8')
-      const parsed = JSON.parse(raw) as StoredAccount[]
+      const parsed = JSON.parse(raw) as (StoredAccount & LegacyStoredAccount)[]
       // `signature` was added after the initial release; default it for
       // accounts saved before the field existed.
-      this.accounts = parsed.map((a) => ({ ...a, signature: a.signature ?? '' }))
+      const withSignature = parsed.map((a) => ({ ...a, signature: a.signature ?? '' }))
+      this.accounts = withSignature.map(migrateSecurity)
+      if (parsed.some((a) => !a.imapSecurity || !a.smtpSecurity)) this.persist()
     } catch {
       this.accounts = []
     }

@@ -9,6 +9,7 @@ export const IpcChannels = {
   MailboxCreate: 'mailboxes:create',
   MailboxRename: 'mailboxes:rename',
   MailboxDelete: 'mailboxes:delete',
+  MailboxEmpty: 'mailboxes:empty',
 
   MessagesList: 'messages:list',
   MessagesGetBody: 'messages:get-body',

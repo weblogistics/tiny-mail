@@ -1,13 +1,20 @@
+// 'ssl' = implicit TLS (connect straight into a TLS handshake, e.g. ports
+// 993/465). 'starttls' = connect in plain text and explicitly upgrade
+// (e.g. ports 143/587) — this is what most "submission port" SMTP servers
+// expect. 'none' = never encrypt, including refusing an opportunistic
+// upgrade even if the server offers one.
+export type ConnectionSecurity = 'ssl' | 'starttls' | 'none'
+
 export interface AccountConfig {
   id: string
   displayName: string
   email: string
   imapHost: string
   imapPort: number
-  imapSecure: boolean
+  imapSecurity: ConnectionSecurity
   smtpHost: string
   smtpPort: number
-  smtpSecure: boolean
+  smtpSecurity: ConnectionSecurity
   username: string
   color: string
   signature: string
@@ -124,6 +131,7 @@ export interface SyncProgress {
 export interface AppSettings {
   markAsReadBehavior: 'instant' | 'never'
   loadRemoteImagesByDefault: boolean
+  syncIntervalSeconds: number
 }
 
 export type MailEventPayload =

@@ -19,6 +19,24 @@ export function GeneralSettingsTab(): JSX.Element {
   return (
     <div>
       <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>Checking for Mail</h3>
+        <label className={styles.radioRow}>
+          Check every
+          <select
+            className={styles.inlineSelect}
+            value={settings.syncIntervalSeconds}
+            onChange={(e) => update({ syncIntervalSeconds: Number(e.target.value) })}
+          >
+            <option value={30}>30 seconds</option>
+            <option value={60}>1 minute</option>
+            <option value={300}>5 minutes</option>
+            <option value={900}>15 minutes</option>
+            <option value={1800}>30 minutes</option>
+          </select>
+        </label>
+      </section>
+
+      <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Reading</h3>
         <label className={styles.radioRow}>
           <input

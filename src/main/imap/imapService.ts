@@ -2,6 +2,7 @@ import { ImapFlow, type MailboxObject } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import type { AccountStore } from '../accounts/accountStore'
 import {
+  clearMailboxMessages,
   getMessageBody,
   listMailboxes as cachedListMailboxes,
   listMessages as cachedListMessages,
@@ -14,6 +15,7 @@ import {
 } from '../db/messageCache'
 import { analyzeBodyStructure } from './bodyStructure'
 import type {
+  ConnectionSecurity,
   MailboxSummary,
   MailEventPayload,
   MessageAddress,
@@ -24,6 +26,15 @@ import type {
 } from '@shared/types'
 
 type Emit = (payload: MailEventPayload) => void
+
+export function resolveImapTls(security: ConnectionSecurity): {
+  secure: boolean
+  doSTARTTLS: boolean
+} {
+  if (security === 'ssl') return { secure: true, doSTARTTLS: false }
+  if (security === 'starttls') return { secure: false, doSTARTTLS: true }
+  return { secure: false, doSTARTTLS: false }
+}
 
 const SPECIAL_USE_MAP: Record<string, SpecialUse> = {
   '\\Inbox': 'Inbox',
@@ -78,9 +89,12 @@ export class ImapService {
     const client = new ImapFlow({
       host: account.imapHost,
       port: account.imapPort,
-      secure: account.imapSecure,
+      ...resolveImapTls(account.imapSecurity),
       auth: { user: account.username, pass: password },
-      logger: false
+      logger: false,
+      // ImapFlow's default is 90s, which makes a misconfigured host/port
+      // feel like the app has hung instead of reporting an error.
+      connectionTimeout: 15000
     })
 
     client.on('error', (err: Error) => {
@@ -341,13 +355,17 @@ export class ImapService {
     }
   }
 
-  // Top-level only: a folder's hierarchy delimiter is server-specific ('/'
-  // vs '.', etc.), so creating *nested* folders safely means knowing that
-  // delimiter, which ImapFlow's array path form handles for a single new
-  // name without us needing to know it at all.
-  async createMailbox(accountId: string, name: string): Promise<void> {
+  // Passing an array of segments (rather than a pre-joined string) to
+  // ImapFlow lets it handle the server's actual hierarchy delimiter ('/'
+  // vs '.', etc.) itself instead of us having to know it up front.
+  async createMailbox(accountId: string, name: string, parentPath: string | null = null): Promise<void> {
     const client = await this.getClient(accountId)
-    await client.mailboxCreate([name])
+    if (!parentPath) {
+      await client.mailboxCreate([name])
+    } else {
+      const delimiter = cachedListMailboxes(accountId).find((m) => m.path === parentPath)?.delimiter || '/'
+      await client.mailboxCreate([...parentPath.split(delimiter), name])
+    }
     await this.listMailboxes(accountId)
   }
 
@@ -367,6 +385,19 @@ export class ImapService {
     const client = await this.getClient(accountId)
     await client.mailboxDelete(path)
     removeCachedMailbox(accountId, path)
+    await this.listMailboxes(accountId)
+  }
+
+  async emptyMailbox(accountId: string, path: string): Promise<void> {
+    const client = await this.getClient(accountId)
+    const lock = await client.getMailboxLock(path)
+    try {
+      const total = (client.mailbox as MailboxObject).exists
+      if (total > 0) await client.messageDelete('1:*', { uid: false })
+    } finally {
+      lock.release()
+    }
+    clearMailboxMessages(accountId, path)
     await this.listMailboxes(accountId)
   }
 

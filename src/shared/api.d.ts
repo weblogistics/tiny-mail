@@ -23,9 +23,10 @@ export interface TinyMailApi {
   }
   mailboxes: {
     list(accountId: string): Promise<MailboxSummary[]>
-    create(accountId: string, name: string): Promise<void>
+    create(accountId: string, name: string, parentPath?: string | null): Promise<void>
     rename(accountId: string, path: string, newName: string): Promise<void>
     delete(accountId: string, path: string): Promise<void>
+    empty(accountId: string, path: string): Promise<void>
   }
   messages: {
     list(accountId: string, mailboxPath: string): Promise<MessageSummary[]>

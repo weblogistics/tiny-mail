@@ -14,9 +14,10 @@ const api: TinyMailApi = {
   },
   mailboxes: {
     list: (accountId) => ipcRenderer.invoke(IpcChannels.MailboxesList, accountId),
-    create: (accountId, name) => ipcRenderer.invoke(IpcChannels.MailboxCreate, accountId, name),
+    create: (accountId, name, parentPath) => ipcRenderer.invoke(IpcChannels.MailboxCreate, accountId, name, parentPath ?? null),
     rename: (accountId, path, newName) => ipcRenderer.invoke(IpcChannels.MailboxRename, accountId, path, newName),
-    delete: (accountId, path) => ipcRenderer.invoke(IpcChannels.MailboxDelete, accountId, path)
+    delete: (accountId, path) => ipcRenderer.invoke(IpcChannels.MailboxDelete, accountId, path),
+    empty: (accountId, path) => ipcRenderer.invoke(IpcChannels.MailboxEmpty, accountId, path)
   },
   messages: {
     list: (accountId, mailboxPath) => ipcRenderer.invoke(IpcChannels.MessagesList, accountId, mailboxPath),

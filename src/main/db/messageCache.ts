@@ -25,6 +25,10 @@ export function removeMailbox(accountId: string, path: string): void {
   getDb().prepare(`DELETE FROM messages WHERE accountId = ? AND mailboxPath = ?`).run(accountId, path)
 }
 
+export function clearMailboxMessages(accountId: string, path: string): void {
+  getDb().prepare(`DELETE FROM messages WHERE accountId = ? AND mailboxPath = ?`).run(accountId, path)
+}
+
 export function upsertMessage(msg: MessageSummary): void {
   getDb()
     .prepare(

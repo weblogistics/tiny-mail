@@ -13,7 +13,7 @@ import type {
   MessageSummary
 } from '@shared/types'
 import type { AccountStore } from '../accounts/accountStore'
-import type { ImapService } from '../imap/imapService'
+import { resolveImapTls, type ImapService } from '../imap/imapService'
 import type { SettingsStore } from '../settings/settingsStore'
 import { verifySmtpConfig, type SmtpService } from '../smtp/smtpService'
 import { searchMessages } from '../db/messageCache'
@@ -69,9 +69,10 @@ export function registerIpcHandlers(
       const client = new ImapFlow({
         host: config.imapHost,
         port: config.imapPort,
-        secure: config.imapSecure,
+        ...resolveImapTls(config.imapSecurity),
         auth: { user: config.username, pass: password },
-        logger: false
+        logger: false,
+        connectionTimeout: 15000
       })
       let imapResult: { ok: true } | { ok: false; error: string }
       try {
@@ -100,9 +101,12 @@ export function registerIpcHandlers(
     return cached
   })
 
-  ipcMain.handle(IpcChannels.MailboxCreate, async (_e, accountId: string, name: string) => {
-    await imapService.createMailbox(accountId, name)
-  })
+  ipcMain.handle(
+    IpcChannels.MailboxCreate,
+    async (_e, accountId: string, name: string, parentPath: string | null) => {
+      await imapService.createMailbox(accountId, name, parentPath)
+    }
+  )
 
   ipcMain.handle(IpcChannels.MailboxRename, async (_e, accountId: string, path: string, newName: string) => {
     await imapService.renameMailbox(accountId, path, newName)
@@ -110,6 +114,10 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.MailboxDelete, async (_e, accountId: string, path: string) => {
     await imapService.deleteMailbox(accountId, path)
+  })
+
+  ipcMain.handle(IpcChannels.MailboxEmpty, async (_e, accountId: string, path: string) => {
+    await imapService.emptyMailbox(accountId, path)
   })
 
   ipcMain.handle(IpcChannels.MessagesList, (_e, accountId: string, mailboxPath: string) => {
@@ -146,7 +154,12 @@ export function registerIpcHandlers(
   ipcMain.handle(
     IpcChannels.MessagesMove,
     async (_e, accountId: string, mailboxPath: string, uid: number, destPath: string) => {
-      await imapService.moveMessage(accountId, mailboxPath, uid, destPath)
+      try {
+        await imapService.moveMessage(accountId, mailboxPath, uid, destPath)
+      } catch (err) {
+        console.error('[messages:move] failed', { accountId, mailboxPath, uid, destPath }, err)
+        throw err
+      }
     }
   )
 

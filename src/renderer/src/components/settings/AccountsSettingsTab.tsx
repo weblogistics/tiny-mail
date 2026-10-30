@@ -13,10 +13,10 @@ const blankForm: AccountFormState = {
   password: '',
   imapHost: '',
   imapPort: 993,
-  imapSecure: true,
+  imapSecurity: 'ssl',
   smtpHost: '',
-  smtpPort: 465,
-  smtpSecure: true,
+  smtpPort: 587,
+  smtpSecurity: 'starttls',
   signature: ''
 }
 
@@ -63,10 +63,10 @@ export function AccountsSettingsTab(): JSX.Element {
     username: form.username || form.email,
     imapHost: form.imapHost,
     imapPort: Number(form.imapPort),
-    imapSecure: form.imapSecure,
+    imapSecurity: form.imapSecurity,
     smtpHost: form.smtpHost,
     smtpPort: Number(form.smtpPort),
-    smtpSecure: form.smtpSecure,
+    smtpSecurity: form.smtpSecurity,
     color: existingColor ?? PALETTE[accounts.length % PALETTE.length],
     signature: form.signature
   })

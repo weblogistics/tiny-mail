@@ -70,6 +70,7 @@ export function Sidebar(): JSX.Element {
   const createMailbox = useMailStore((s) => s.createMailbox)
   const renameMailbox = useMailStore((s) => s.renameMailbox)
   const deleteMailbox = useMailStore((s) => s.deleteMailbox)
+  const emptyMailbox = useMailStore((s) => s.emptyMailbox)
   const moveMessage = useMailStore((s) => s.moveMessage)
   const [menu, setMenu] = useState<{ x: number; y: number; mb: MailboxSummary } | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
@@ -85,18 +86,39 @@ export function Sidebar(): JSX.Element {
   const menuItems: ContextMenuItem[] = menu
     ? [
         {
+          label: 'New Mailbox Inside…',
+          onSelect: () => setPrompt({ kind: 'new', mb: menu.mb })
+        },
+        {
           label: 'Rename Mailbox…',
-          onSelect: () => setPrompt({ kind: 'rename', mb: menu.mb })
+          disabled: !!menu.mb.specialUse,
+          onSelect: () => setPrompt({ kind: 'rename', mb: menu.mb }),
+          separatorBefore: true
         },
         {
           label: 'Delete Mailbox',
           danger: true,
+          disabled: !!menu.mb.specialUse,
           onSelect: () => {
             if (window.confirm(`Delete "${menu.mb.name}" and everything in it? This can't be undone.`)) {
               deleteMailbox(menu.mb.path)
             }
           }
-        }
+        },
+        ...(menu.mb.specialUse === 'Trash' || menu.mb.specialUse === 'Junk'
+          ? [
+              {
+                label: `Empty ${menu.mb.specialUse === 'Trash' ? 'Trash' : 'Junk'}`,
+                danger: true,
+                separatorBefore: true,
+                onSelect: () => {
+                  if (window.confirm(`Permanently erase all messages in "${menu.mb.name}"? This can't be undone.`)) {
+                    emptyMailbox(menu.mb.path)
+                  }
+                }
+              }
+            ]
+          : [])
       ]
     : []
 
@@ -134,8 +156,8 @@ export function Sidebar(): JSX.Element {
                           selectMailbox(mb.path)
                         }}
                         onContextMenu={(e) => {
-                          if (mb.specialUse) return // don't let special mailboxes be renamed/deleted
                           e.preventDefault()
+                          if (account.id !== selectedAccountId) selectAccount(account.id)
                           setMenu({ x: e.clientX, y: e.clientY, mb })
                         }}
                         onDragOver={(e) => {
@@ -186,11 +208,11 @@ export function Sidebar(): JSX.Element {
 
       {prompt?.kind === 'new' && (
         <PromptDialog
-          title="New Mailbox"
+          title={prompt.mb ? `New Mailbox Inside "${prompt.mb.name}"` : 'New Mailbox'}
           label="Name:"
           confirmLabel="Create"
           onSubmit={(name) => {
-            createMailbox(name)
+            createMailbox(name, prompt.mb?.path ?? null)
             setPrompt(null)
           }}
           onCancel={() => setPrompt(null)}
