@@ -1,0 +1,167 @@
+import { useEffect, useRef, useState } from 'react'
+import type { AccountConfig, ComposeAttachment, ComposeDraft, ComposeMode } from '@shared/types'
+import { TrafficLights } from './components/TrafficLights'
+import { RichTextToolbar } from './components/RichTextToolbar'
+import { IconClose, IconPaperclip } from './components/Icons'
+import styles from './ComposeStandalone.module.css'
+
+function emptyDraft(accountId: string): ComposeDraft {
+  return { accountId, to: '', cc: '', bcc: '', subject: '', html: '', attachments: [] }
+}
+
+function titleFor(mode: ComposeMode): string {
+  if (mode === 'reply') return 'Reply'
+  if (mode === 'replyAll') return 'Reply All'
+  if (mode === 'forward') return 'Forward'
+  return 'New Message'
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function ComposeStandalone(): JSX.Element | null {
+  const [accounts, setAccounts] = useState<AccountConfig[]>([])
+  const [mode, setMode] = useState<ComposeMode>('new')
+  const [draft, setDraft] = useState<ComposeDraft | null>(null)
+  const [showCc, setShowCc] = useState(false)
+  const [sending, setSending] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const initialHtml = useRef('')
+
+  useEffect(() => {
+    void (async () => {
+      const [accountList, seed] = await Promise.all([window.api.accounts.list(), window.api.compose.getInit()])
+      setAccounts(accountList)
+      const accountId = seed?.accountId ?? accountList[0]?.id ?? ''
+      const nextDraft = { ...emptyDraft(accountId), ...seed?.draft }
+      setMode(seed?.mode ?? 'new')
+      setDraft(nextDraft)
+      initialHtml.current = nextDraft.html
+      setShowCc(!!(nextDraft.cc || nextDraft.bcc))
+    })()
+  }, [])
+
+  if (!draft) return null
+
+  const account = accounts.find((a) => a.id === draft.accountId)
+  const update = (patch: Partial<ComposeDraft>): void => setDraft((d) => (d ? { ...d, ...patch } : d))
+
+  const handleSend = async (): Promise<void> => {
+    const finalDraft = { ...draft, html: bodyRef.current?.innerHTML ?? draft.html }
+    setSending(true)
+    try {
+      await window.api.compose.send(finalDraft)
+      window.api.window.close()
+    } catch (err) {
+      setSending(false)
+      window.alert(`Couldn't send this message: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const handleAttach = async (): Promise<void> => {
+    const picked = await window.api.compose.pickAttachments()
+    if (picked.length === 0) return
+    update({ attachments: [...draft.attachments, ...picked] })
+  }
+
+  const removeAttachment = (path: string): void => {
+    update({ attachments: draft.attachments.filter((a: ComposeAttachment) => a.path !== path) })
+  }
+
+  return (
+    <div className={styles.window}>
+      <div className={`${styles.titleBar} drag-region`}>
+        <TrafficLights />
+        <span className={styles.title}>{titleFor(mode)}</span>
+        <div className={styles.titleBarSpacer} />
+      </div>
+
+      <div className={styles.fields}>
+        {accounts.length > 1 ? (
+          <div className={styles.fieldRow}>
+            <label>From:</label>
+            <select value={draft.accountId} onChange={(e) => update({ accountId: e.target.value })}>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.displayName} &lt;{a.email}&gt;
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className={styles.fieldRow}>
+            <label>From:</label>
+            <span className={styles.fromValue}>{account ? `${account.displayName} <${account.email}>` : ''}</span>
+          </div>
+        )}
+        <div className={styles.fieldRow}>
+          <label>To:</label>
+          <input value={draft.to} onChange={(e) => update({ to: e.target.value })} autoFocus={!draft.to} />
+          {!showCc && (
+            <button className={styles.ccToggle} onClick={() => setShowCc(true)}>
+              Cc/Bcc
+            </button>
+          )}
+        </div>
+        {showCc && (
+          <>
+            <div className={styles.fieldRow}>
+              <label>Cc:</label>
+              <input value={draft.cc} onChange={(e) => update({ cc: e.target.value })} />
+            </div>
+            <div className={styles.fieldRow}>
+              <label>Bcc:</label>
+              <input value={draft.bcc} onChange={(e) => update({ bcc: e.target.value })} />
+            </div>
+          </>
+        )}
+        <div className={styles.fieldRow}>
+          <label>Subject:</label>
+          <input value={draft.subject} onChange={(e) => update({ subject: e.target.value })} />
+        </div>
+      </div>
+
+      {draft.attachments.length > 0 && (
+        <div className={styles.attachments}>
+          {draft.attachments.map((a: ComposeAttachment) => (
+            <div key={a.path} className={styles.attachmentChip}>
+              <IconPaperclip width={12} height={12} />
+              <span className={styles.attachmentName}>{a.filename}</span>
+              <span className={styles.attachmentSize}>{formatBytes(a.size)}</span>
+              <button
+                className={styles.attachmentRemove}
+                onClick={() => removeAttachment(a.path)}
+                aria-label={`Remove ${a.filename}`}
+              >
+                <IconClose width={9} height={9} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <RichTextToolbar targetRef={bodyRef} />
+
+      <div
+        ref={bodyRef}
+        className={styles.body}
+        contentEditable
+        suppressContentEditableWarning
+        dangerouslySetInnerHTML={{ __html: initialHtml.current }}
+      />
+
+      <div className={styles.footer}>
+        <button className={styles.attachButton} title="Attach File" onClick={handleAttach}>
+          <IconPaperclip width={15} height={15} />
+        </button>
+        <div className={styles.footerSpacer} />
+        <button className={styles.sendButton} disabled={sending || !draft.to.trim()} onClick={handleSend}>
+          {sending ? 'Sending…' : 'Send'}
+        </button>
+      </div>
+    </div>
+  )
+}

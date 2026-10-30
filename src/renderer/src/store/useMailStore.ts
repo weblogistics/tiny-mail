@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   AccountConfig,
   ComposeDraft,
+  ComposeMode,
   MailboxSummary,
   MessageBody,
   MessageSummary,
@@ -28,24 +29,6 @@ function adjustUnreadCount(set: SetFn, accountId: string, mailboxPath: string, d
   })
 }
 
-export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward'
-
-interface ComposeState {
-  open: boolean
-  mode: ComposeMode
-  draft: ComposeDraft
-}
-
-const emptyDraft = (accountId: string): ComposeDraft => ({
-  accountId,
-  to: '',
-  cc: '',
-  bcc: '',
-  subject: '',
-  html: '',
-  attachments: []
-})
-
 interface MailState {
   accounts: AccountConfig[]
   selectedAccountId: string | null
@@ -59,7 +42,6 @@ interface MailState {
   searchQuery: string
   searchResults: MessageSummary[] | null
   isAccountDialogOpen: boolean
-  compose: ComposeState | null
 
   init(): Promise<void>
   selectAccount(accountId: string): Promise<void>
@@ -76,9 +58,6 @@ interface MailState {
   search(query: string): Promise<void>
   clearSearch(): void
   openCompose(mode: ComposeMode, seed?: Partial<ComposeDraft>): void
-  updateCompose(patch: Partial<ComposeDraft>): void
-  closeCompose(): void
-  sendCompose(): Promise<void>
 }
 
 export const useMailStore = create<MailState>((set, get) => ({
@@ -94,7 +73,6 @@ export const useMailStore = create<MailState>((set, get) => ({
   searchQuery: '',
   searchResults: null,
   isAccountDialogOpen: false,
-  compose: null,
 
   async init() {
     window.api.events.subscribe((payload) => {
@@ -276,21 +254,6 @@ export const useMailStore = create<MailState>((set, get) => ({
   openCompose(mode, seed) {
     const accountId = get().selectedAccountId
     if (!accountId) return
-    set({ compose: { open: true, mode, draft: { ...emptyDraft(accountId), ...seed } } })
-  },
-
-  updateCompose(patch) {
-    set((s) => (s.compose ? { compose: { ...s.compose, draft: { ...s.compose.draft, ...patch } } } : s))
-  },
-
-  closeCompose() {
-    set({ compose: null })
-  },
-
-  async sendCompose() {
-    const compose = get().compose
-    if (!compose) return
-    await window.api.compose.send(compose.draft)
-    set({ compose: null })
+    window.api.compose.openWindow({ accountId, mode, draft: seed ?? {} })
   }
 }))

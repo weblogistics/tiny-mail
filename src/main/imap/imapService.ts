@@ -165,6 +165,15 @@ export class ImapService {
       const start = Math.max(1, total - limit + 1)
       const range = `${start}:*`
 
+      // A message's content (and so its snippet) never changes once fetched,
+      // only its flags do. Re-downloading every snippet on every sync/poll
+      // was both wasteful and, worse, visibly clobbered the cached preview
+      // text with '' for an instant before refilling it — the "list flashes
+      // blank then repopulates" bug. So: look up what's cached first, keep
+      // an existing snippet as-is, and only fetch one for messages that
+      // don't have one yet.
+      const existingByUid = new Map(cachedListMessages(accountId, mailboxPath).map((m) => [m.uid, m]))
+
       // Phase 1: drain the FETCH command fully before issuing any other
       // command on this connection. ImapFlow serializes commands on a
       // connection, so calling client.download() mid-iteration here would
@@ -184,6 +193,7 @@ export class ImapService {
         { uid: false }
       )) {
         const { hasAttachments, snippetPartId } = analyzeBodyStructure(msg.bodyStructure as never)
+        const existing = existingByUid.get(msg.uid)
         const summary: MessageSummary = {
           accountId,
           mailboxPath,
@@ -202,14 +212,17 @@ export class ImapService {
             deleted: msg.flags?.has('\\Deleted') ?? false
           },
           hasAttachments,
-          snippet: ''
+          snippet: existing?.snippet ?? ''
         }
-        pending.push({ uid: msg.uid, summary, snippetPartId })
+        if (!existing || !existing.snippet) {
+          pending.push({ uid: msg.uid, summary, snippetPartId })
+        }
         upsertMessage(summary)
       }
 
       // Phase 2: the FETCH command is closed now, so it's safe to issue
-      // DOWNLOAD commands on the same connection to backfill snippets.
+      // DOWNLOAD commands on the same connection to backfill snippets —
+      // only for messages that didn't already have one cached.
       let fetched = 0
       for (const item of pending) {
         if (item.snippetPartId) {

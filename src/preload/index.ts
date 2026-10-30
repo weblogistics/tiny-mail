@@ -31,7 +31,9 @@ const api: TinyMailApi = {
   compose: {
     send: (draft) => ipcRenderer.invoke(IpcChannels.ComposeSend, draft),
     saveDraft: (draft) => ipcRenderer.invoke(IpcChannels.ComposeSaveDraft, draft),
-    pickAttachments: () => ipcRenderer.invoke(IpcChannels.ComposePickAttachments)
+    pickAttachments: () => ipcRenderer.invoke(IpcChannels.ComposePickAttachments),
+    openWindow: (seed) => ipcRenderer.invoke(IpcChannels.ComposeOpenWindow, seed),
+    getInit: () => ipcRenderer.invoke(IpcChannels.ComposeGetInit)
   },
   events: {
     subscribe: (listener) => {

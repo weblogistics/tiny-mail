@@ -88,6 +88,14 @@ export interface ComposeDraft {
   attachments: ComposeAttachment[]
 }
 
+export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward'
+
+export interface ComposeSeed {
+  accountId: string
+  mode: ComposeMode
+  draft: Partial<ComposeDraft>
+}
+
 export interface ComposeAttachment {
   filename: string
   contentType: string

@@ -1,55 +1,30 @@
-.overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  padding: 24px;
-  pointer-events: none;
-  z-index: 50;
-}
-
 .window {
-  width: 560px;
-  height: 520px;
   display: flex;
   flex-direction: column;
+  height: 100vh;
   background: var(--list-bg);
-  border-radius: var(--radius-md);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--border);
-  overflow: hidden;
-  pointer-events: auto;
 }
 
 .titleBar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: 34px;
-  padding: 0 10px 0 14px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 10px;
   background: var(--toolbar-bg);
   border-bottom: 1px solid var(--border);
 }
 
 .title {
+  flex: 1;
+  text-align: center;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
-.closeButton {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-}
-
-.closeButton:hover {
-  background: rgba(128, 128, 128, 0.2);
+.titleBarSpacer {
+  width: 56px;
 }
 
 .fields {
@@ -61,7 +36,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 0;
+  padding: 6px 0;
   border-bottom: 1px solid var(--list-bg-alt);
 }
 
@@ -76,7 +51,8 @@
   font-size: 12px;
 }
 
-.fieldRow input {
+.fieldRow input,
+.fieldRow select {
   flex: 1;
   border: none;
   outline: none;
@@ -94,16 +70,6 @@
   color: var(--accent);
   font-size: 12px;
   flex-shrink: 0;
-}
-
-.body {
-  flex: 1;
-  padding: 14px;
-  overflow-y: auto;
-  outline: none;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--text-primary);
 }
 
 .attachments {
@@ -127,7 +93,7 @@
 
 .attachmentName {
   font-weight: 500;
-  max-width: 160px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -149,6 +115,16 @@
 
 .attachmentRemove:hover {
   background: rgba(128, 128, 128, 0.25);
+}
+
+.body {
+  flex: 1;
+  padding: 14px;
+  overflow-y: auto;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
 }
 
 .footer {

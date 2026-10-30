@@ -152,6 +152,46 @@ export const IconClose = (p: IconProps) => (
   </svg>
 )
 
+export const IconLink = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9.5 14.5l5-5" />
+    <path d="M11 7l1.5-1.5a3.5 3.5 0 0 1 5 5L16 12" />
+    <path d="M13 17l-1.5 1.5a3.5 3.5 0 0 1-5-5L8 12" />
+  </svg>
+)
+
+export const IconBulletList = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="5" cy="7" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="5" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="5" cy="17" r="1.2" fill="currentColor" stroke="none" />
+    <path d="M9 7h11M9 12h11M9 17h11" />
+  </svg>
+)
+
+export const IconNumberedList = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9 7h11M9 12h11M9 17h11" />
+    <text x="2" y="9" fontSize="7" fill="currentColor" stroke="none">
+      1
+    </text>
+    <text x="2" y="14" fontSize="7" fill="currentColor" stroke="none">
+      2
+    </text>
+    <text x="2" y="19" fontSize="7" fill="currentColor" stroke="none">
+      3
+    </text>
+  </svg>
+)
+
+export const IconClearFormat = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 5h13" />
+    <path d="M10 5l2 14" />
+    <path d="M6 19l12-12" />
+  </svg>
+)
+
 export const IconSidebar = (p: IconProps) => (
   <svg {...base(p)}>
     <rect x="3.5" y="4.5" width="17" height="15" rx="2" />

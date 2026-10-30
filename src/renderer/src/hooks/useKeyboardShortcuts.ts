@@ -14,12 +14,12 @@ export function useKeyboardShortcuts(): void {
       const mod = e.ctrlKey || e.metaKey
       const state = useMailStore.getState()
 
-      // Escape always works, even while typing, to back out of compose/dialogs.
+      // Escape always works, even while typing, to back out of a dialog.
+      // (Compose is its own OS window now, with no escape-to-close of its
+      // own — losing a half-written message to a stray Escape is worse
+      // than requiring the close button.)
       if (e.key === 'Escape') {
-        if (state.compose) {
-          state.closeCompose()
-          e.preventDefault()
-        } else if (state.isAccountDialogOpen && state.accounts.length > 0) {
+        if (state.isAccountDialogOpen && state.accounts.length > 0) {
           state.setAccountDialogOpen(false)
           e.preventDefault()
         }

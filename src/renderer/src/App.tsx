@@ -5,7 +5,6 @@ import { Toolbar } from './components/Toolbar'
 import { Sidebar } from './components/Sidebar'
 import { MessageList } from './components/MessageList'
 import { ReadingPane } from './components/ReadingPane'
-import { ComposeWindow } from './components/ComposeWindow'
 import { AccountSetupDialog } from './components/AccountSetupDialog'
 
 export default function App(): JSX.Element {
@@ -35,7 +34,6 @@ export default function App(): JSX.Element {
         <Sidebar />
         <MessageList />
         <ReadingPane />
-        <ComposeWindow />
         <AccountSetupDialog />
       </div>
     </div>

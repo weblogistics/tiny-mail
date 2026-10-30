@@ -4,11 +4,12 @@ import { statSync } from 'fs'
 import { basename } from 'path'
 import mime from 'mime-types'
 import { IpcChannels } from '@shared/ipc'
-import type { AccountConfig, ComposeDraft, MailEventPayload, MessageSummary } from '@shared/types'
+import type { AccountConfig, ComposeDraft, ComposeSeed, MailEventPayload, MessageSummary } from '@shared/types'
 import type { AccountStore } from '../accounts/accountStore'
 import type { ImapService } from '../imap/imapService'
 import { verifySmtpConfig, type SmtpService } from '../smtp/smtpService'
 import { searchMessages } from '../db/messageCache'
+import { openComposeWindow, takeComposeInit } from '../windows/composeWindow'
 
 export function broadcast(payload: MailEventPayload): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -145,6 +146,14 @@ export function registerIpcHandlers(
     const draftsBox = mailboxes.find((m) => m.specialUse === 'Drafts')?.path ?? 'Drafts'
     const raw = await smtpService.buildMime(draft)
     await imapService.appendMessage(draft.accountId, draftsBox, raw, ['\\Draft'])
+  })
+
+  ipcMain.handle(IpcChannels.ComposeOpenWindow, (_e, seed: ComposeSeed) => {
+    openComposeWindow(seed)
+  })
+
+  ipcMain.handle(IpcChannels.ComposeGetInit, (e) => {
+    return takeComposeInit(e.sender.id)
   })
 
   ipcMain.handle(IpcChannels.ComposePickAttachments, async (e) => {
