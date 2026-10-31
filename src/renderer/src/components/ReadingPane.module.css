@@ -21,13 +21,34 @@
 }
 
 .subjectRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
 .subject {
+  flex: 1;
+  min-width: 0;
   font-size: 17px;
   font-weight: 600;
   margin: 0;
+  color: var(--text-primary);
+}
+
+.darkToggle {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.darkToggle:hover {
+  background: var(--list-bg-alt);
   color: var(--text-primary);
 }
 
