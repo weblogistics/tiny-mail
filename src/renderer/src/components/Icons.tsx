@@ -234,6 +234,14 @@ export const IconFolderPlus = (p: IconProps) => (
   </svg>
 )
 
+export const IconMoveToFolder = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+    <path d="M9.5 13h5.5" />
+    <path d="M12.5 10.5 15 13l-2.5 2.5" />
+  </svg>
+)
+
 export const IconPencil = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M4 20h4L18 10l-4-4L4 16v4z" />

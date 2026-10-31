@@ -28,6 +28,23 @@
   cursor: default;
 }
 
+/* Keeps full colour while spinning: the button is disabled during a sync to
+   prevent overlapping fetches, but it's mid-action rather than unavailable,
+   so the usual dimmed-out treatment would read as the wrong thing. */
+.spinning:disabled {
+  color: var(--accent);
+}
+
+.spinning svg {
+  animation: toolbar-spin 1s linear infinite;
+}
+
+@keyframes toolbar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .spacer {
   flex: 1;
 }

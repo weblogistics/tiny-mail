@@ -10,8 +10,8 @@ export function Toolbar(): JSX.Element {
   const searchQuery = useMailStore((s) => s.searchQuery)
   const search = useMailStore((s) => s.search)
   const clearSearch = useMailStore((s) => s.clearSearch)
-  const refreshMailboxes = useMailStore((s) => s.refreshMailboxes)
-  const syncSelectedMailbox = useMailStore((s) => s.syncSelectedMailbox)
+  const getMail = useMailStore((s) => s.getMail)
+  const isManualSyncing = useMailStore((s) => s.isManualSyncing)
   const openCompose = useMailStore((s) => s.openCompose)
 
   return (
@@ -27,13 +27,10 @@ export function Toolbar(): JSX.Element {
       </button>
 
       <button
-        className={`${styles.iconButton} no-drag`}
-        title="Get Mail"
-        onClick={() => {
-          if (!selectedAccountId) return
-          refreshMailboxes(selectedAccountId)
-          syncSelectedMailbox()
-        }}
+        className={`${styles.iconButton} ${isManualSyncing ? styles.spinning : ''} no-drag`}
+        title={isManualSyncing ? 'Checking for mail…' : 'Get Mail'}
+        disabled={!selectedAccountId || isManualSyncing}
+        onClick={() => getMail()}
       >
         <IconGetMail />
       </button>

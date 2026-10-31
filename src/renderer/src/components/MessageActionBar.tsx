@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import { buildForwardSeed, buildReplySeed } from '../utils/quote'
 import { isOutgoingMailbox } from '../utils/isOutgoingMailbox'
@@ -8,10 +9,12 @@ import {
   IconFlagOutline,
   IconForward,
   IconJunk,
+  IconMoveToFolder,
   IconReply,
   IconReplyAll,
   IconTrash
 } from './Icons'
+import { FolderPicker } from './FolderPicker'
 import styles from './MessageActionBar.module.css'
 
 interface MessageActionBarProps {
@@ -27,6 +30,7 @@ export function MessageActionBar({ message, body }: MessageActionBarProps): JSX.
   const moveMessage = useMailStore((s) => s.moveMessage)
   const setFlags = useMailStore((s) => s.setFlags)
   const openCompose = useMailStore((s) => s.openCompose)
+  const [moveAnchor, setMoveAnchor] = useState<{ x: number; y: number } | null>(null)
 
   const selfEmail = accounts.find((a) => a.id === selectedAccountId)?.email.toLowerCase()
   const boxes = selectedAccountId ? mailboxesByAccount[selectedAccountId] ?? [] : []
@@ -73,6 +77,16 @@ export function MessageActionBar({ message, body }: MessageActionBarProps): JSX.
         >
           <IconJunk />
         </button>
+        <button
+          className={styles.iconButton}
+          title="Move to…"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect()
+            setMoveAnchor({ x: r.left, y: r.bottom + 4 })
+          }}
+        >
+          <IconMoveToFolder />
+        </button>
         <button className={styles.iconButton} title="Delete" onClick={() => deleteMessage(message.uid)}>
           <IconTrash />
         </button>
@@ -87,6 +101,17 @@ export function MessageActionBar({ message, body }: MessageActionBarProps): JSX.
       >
         {message.flags.flagged ? <IconFlagFilled /> : <IconFlagOutline />}
       </button>
+
+      {moveAnchor && (
+        <FolderPicker
+          x={moveAnchor.x}
+          y={moveAnchor.y}
+          boxes={boxes}
+          currentPath={message.mailboxPath}
+          onPick={(path) => moveMessage(message.uid, path)}
+          onClose={() => setMoveAnchor(null)}
+        />
+      )}
     </div>
   )
 }

@@ -30,6 +30,16 @@ import type {
 
 type Emit = (payload: MailEventPayload) => void
 
+// A message can vanish from the server between our last sync and the moment
+// its body is requested — deleted or filed away from a phone or webmail.
+// ImapFlow resolves download() to an empty object in that case, and the
+// resulting undefined stream used to reach simpleParser as the opaque
+// "Input cannot be null or undefined", which surfaced in the UI as a message
+// that simply rendered blank forever. Thrown as a plain Error carrying a
+// stable code because an Error subclass doesn't survive IPC serialization
+// into the renderer — only its message does.
+export const MESSAGE_GONE_CODE = 'TINY_MAIL_MESSAGE_GONE'
+
 export function resolveImapTls(security: ConnectionSecurity): {
   secure: boolean
   doSTARTTLS: boolean
@@ -471,6 +481,13 @@ export class ImapService {
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       const { content } = await client.download(String(uid), undefined, { uid: true })
+      if (!content) {
+        // Drop the phantom row so the list stops offering a message that can
+        // never be opened, and tell the renderer why it disappeared.
+        removeMessage(accountId, mailboxPath, uid)
+        this.emit({ type: 'message-removed', data: { accountId, mailboxPath, uid } })
+        throw new Error(MESSAGE_GONE_CODE)
+      }
       return await simpleParser(content)
     } finally {
       lock.release()

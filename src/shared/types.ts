@@ -165,6 +165,7 @@ export type MailEventPayload =
   | { type: 'sync-progress'; data: SyncProgress }
   | { type: 'mailbox-updated'; data: MailboxSummary }
   | { type: 'new-message'; data: MessageSummary }
+  | { type: 'message-removed'; data: { accountId: string; mailboxPath: string; uid: number } }
   | { type: 'account-status'; data: { accountId: string; status: 'connecting' | 'online' | 'offline' | 'error'; error?: string } }
   | { type: 'settings-updated'; data: AppSettings }
   | { type: 'accounts-changed'; data: null }

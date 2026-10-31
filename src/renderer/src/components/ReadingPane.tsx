@@ -55,7 +55,10 @@ export function ReadingPane(): JSX.Element {
   const key = selectedAccountId && selectedMailboxPath ? `${selectedAccountId}::${selectedMailboxPath}` : null
   const list = searchResults ?? (key ? messagesByKey[key] ?? [] : [])
   const message = list.find((m) => m.uid === selectedUid)
-  const bodyKey = selectedAccountId && selectedMailboxPath && selectedUid != null ? `${selectedAccountId}::${selectedMailboxPath}::${selectedUid}` : null
+  // Keyed off the message's own mailbox rather than the selected one: a
+  // search result can come from any folder, and keying by the sidebar
+  // selection would look up (or collide with) a different message's body.
+  const bodyKey = message ? `${message.accountId}::${message.mailboxPath}::${message.uid}` : null
   const body = bodyKey ? bodyCache[bodyKey] : undefined
 
   // Reset to the user's default for each newly-opened message rather than
@@ -89,10 +92,9 @@ export function ReadingPane(): JSX.Element {
   }
 
   const handleOpenAttachment = async (a: MessageAttachment): Promise<void> => {
-    if (!selectedAccountId || !selectedMailboxPath) return
     setOpeningPartId(a.partId)
     try {
-      await window.api.mail.openAttachment(selectedAccountId, selectedMailboxPath, message.uid, a.partId)
+      await window.api.mail.openAttachment(message.accountId, message.mailboxPath, message.uid, a.partId)
     } catch (err) {
       window.alert(`Couldn't open "${a.filename}": ${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -101,9 +103,8 @@ export function ReadingPane(): JSX.Element {
   }
 
   const handleSaveAttachment = async (a: MessageAttachment): Promise<void> => {
-    if (!selectedAccountId || !selectedMailboxPath) return
     try {
-      await window.api.mail.saveAttachment(selectedAccountId, selectedMailboxPath, message.uid, a.partId)
+      await window.api.mail.saveAttachment(message.accountId, message.mailboxPath, message.uid, a.partId)
     } catch (err) {
       window.alert(`Couldn't save "${a.filename}": ${err instanceof Error ? err.message : String(err)}`)
     }

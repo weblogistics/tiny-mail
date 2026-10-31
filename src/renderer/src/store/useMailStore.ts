@@ -18,6 +18,23 @@ function resultKey(m: MessageSummary): string {
   return `${m.accountId}:${m.mailboxPath}:${m.uid}`
 }
 
+// Which message a UID refers to depends on what's on screen: server search
+// results span every mailbox, so a UID shown there can belong to a folder
+// other than the one selected in the sidebar. Acting on selectedMailboxPath
+// in that case would hit a completely different message that merely happens
+// to share the UID number, so always resolve against the displayed list and
+// use the message's own accountId/mailboxPath.
+function findDisplayedMessage(state: MailState, uid: number): MessageSummary | undefined {
+  if (state.searchResults) return state.searchResults.find((m) => m.uid === uid)
+  const { selectedAccountId, selectedMailboxPath } = state
+  if (!selectedAccountId || !selectedMailboxPath) return undefined
+  return state.messagesByKey[key(selectedAccountId, selectedMailboxPath)]?.find((m) => m.uid === uid)
+}
+
+function withoutMessage(list: MessageSummary[] | null, mailboxPath: string, uid: number): MessageSummary[] | null {
+  return list?.filter((m) => !(m.mailboxPath === mailboxPath && m.uid === uid)) ?? null
+}
+
 // Local search only covers whatever's already synced, so every keystroke
 // also schedules a real IMAP SEARCH across the server once typing pauses —
 // debounced (rather than fired per keystroke) since it's a live round trip
@@ -58,6 +75,12 @@ interface MailState {
   isSearchingServer: boolean
   isAccountDialogOpen: boolean
   settings: AppSettings | null
+  // Set the instant a manual "Get Mail" starts, so the status bar reacts to
+  // the click itself rather than waiting for the first sync-progress event
+  // (which can be seconds later, or never when nothing needs downloading).
+  isManualSyncing: boolean
+  lastSyncAt: number | null
+  statusNotice: string | null
 
   init(): Promise<void>
   selectAccount(accountId: string): Promise<void>
@@ -72,6 +95,8 @@ interface MailState {
   setFlags(uid: number, flags: Partial<MessageSummary['flags']>): Promise<void>
   moveMessage(uid: number, destPath: string): Promise<void>
   deleteMessage(uid: number): Promise<void>
+  getMail(): Promise<void>
+  setStatusNotice(notice: string | null): void
   search(query: string): Promise<void>
   clearSearch(): void
   openCompose(mode: ComposeMode, seed?: Partial<ComposeDraft>): void
@@ -96,6 +121,9 @@ export const useMailStore = create<MailState>((set, get) => ({
   isSearchingServer: false,
   isAccountDialogOpen: false,
   settings: null,
+  isManualSyncing: false,
+  lastSyncAt: null,
+  statusNotice: null,
 
   async init() {
     window.api.events.subscribe((payload) => {
@@ -113,6 +141,21 @@ export const useMailStore = create<MailState>((set, get) => ({
           const next = idx >= 0 ? [...list.slice(0, idx), payload.data, ...list.slice(idx + 1)] : [...list, payload.data]
           return { mailboxesByAccount: { ...s.mailboxesByAccount, [payload.data.accountId]: next } }
         })
+      } else if (payload.type === 'message-removed') {
+        const { accountId, mailboxPath, uid } = payload.data
+        const k = key(accountId, mailboxPath)
+        set((s) => ({
+          messagesByKey: {
+            ...s.messagesByKey,
+            [k]: (s.messagesByKey[k] ?? []).filter((m) => m.uid !== uid)
+          },
+          searchResults:
+            s.searchResults?.filter(
+              (m) => !(m.accountId === accountId && m.mailboxPath === mailboxPath && m.uid === uid)
+            ) ?? null,
+          selectedUid: s.selectedUid === uid ? null : s.selectedUid,
+          statusNotice: 'That message is no longer on the server — the list has been updated.'
+        }))
       } else if (payload.type === 'account-status') {
         set((s) => ({ accountStatus: { ...s.accountStatus, [payload.data.accountId]: payload.data.status } }))
       } else if (payload.type === 'settings-updated') {
@@ -170,23 +213,57 @@ export const useMailStore = create<MailState>((set, get) => ({
     const mailboxPath = get().selectedMailboxPath
     if (!accountId || !mailboxPath) return
     await window.api.mail.sync(accountId, mailboxPath)
+    set({ lastSyncAt: Date.now() })
+  },
+
+  // What the "Get Mail" button runs. Unlike the background poll this reports
+  // itself to the status bar from the click onwards, so the button always
+  // visibly does something even when there turns out to be no new mail.
+  async getMail() {
+    const accountId = get().selectedAccountId
+    if (!accountId || get().isManualSyncing) return
+    set({ isManualSyncing: true, statusNotice: null })
+    try {
+      await get().refreshMailboxes(accountId)
+      await get().syncSelectedMailbox()
+      set({ lastSyncAt: Date.now() })
+    } catch (err) {
+      set({ statusNotice: `Couldn't check for mail: ${err instanceof Error ? err.message : String(err)}` })
+    } finally {
+      set({ isManualSyncing: false })
+    }
+  },
+
+  setStatusNotice(notice) {
+    set({ statusNotice: notice })
   },
 
   async selectMessage(uid) {
-    const accountId = get().selectedAccountId
-    const mailboxPath = get().selectedMailboxPath
-    if (!accountId || !mailboxPath) return
     set({ selectedUid: uid })
+    const current = findDisplayedMessage(get(), uid)
+    if (!current) return
+    const { accountId, mailboxPath } = current
 
-    const current = get().messagesByKey[key(accountId, mailboxPath)]?.find((m) => m.uid === uid)
-    if (current && !current.flags.seen && get().settings?.markAsReadBehavior !== 'never') {
+    if (!current.flags.seen && get().settings?.markAsReadBehavior !== 'never') {
       await get().setFlags(uid, { seen: true })
     }
 
     const bodyKey = `${accountId}::${mailboxPath}::${uid}`
     if (!get().bodyCache[bodyKey]) {
-      const body = await window.api.messages.getBody(accountId, mailboxPath, uid)
-      set((s) => ({ bodyCache: { ...s.bodyCache, [bodyKey]: body } }))
+      try {
+        const body = await window.api.messages.getBody(accountId, mailboxPath, uid)
+        set((s) => ({ bodyCache: { ...s.bodyCache, [bodyKey]: body } }))
+      } catch (err) {
+        // A message that's gone from the server already removed itself from
+        // the list via the 'message-removed' event, so say nothing extra
+        // here. Anything else is a genuine fetch failure worth surfacing
+        // rather than leaving the reading pane mysteriously empty.
+        if (!String(err).includes('TINY_MAIL_MESSAGE_GONE')) {
+          set({
+            statusNotice: `Couldn't load that message: ${err instanceof Error ? err.message : String(err)}`
+          })
+        }
+      }
     }
   },
 
@@ -211,20 +288,20 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   async setFlags(uid, flags) {
-    const accountId = get().selectedAccountId
-    const mailboxPath = get().selectedMailboxPath
-    if (!accountId || !mailboxPath) return
+    const before = findDisplayedMessage(get(), uid)
+    if (!before) return
+    const { accountId, mailboxPath } = before
     const k = key(accountId, mailboxPath)
-    const before = get().messagesByKey[k]?.find((m) => m.uid === uid)
+
+    const apply = (m: MessageSummary): MessageSummary =>
+      m.mailboxPath === mailboxPath && m.uid === uid ? { ...m, flags: { ...m.flags, ...flags } } : m
 
     set((s) => ({
-      messagesByKey: {
-        ...s.messagesByKey,
-        [k]: (s.messagesByKey[k] ?? []).map((m) => (m.uid === uid ? { ...m, flags: { ...m.flags, ...flags } } : m))
-      }
+      messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).map(apply) },
+      searchResults: s.searchResults?.map(apply) ?? null
     }))
 
-    if (before && typeof flags.seen === 'boolean' && flags.seen !== before.flags.seen) {
+    if (typeof flags.seen === 'boolean' && flags.seen !== before.flags.seen) {
       adjustUnreadCount(set, accountId, mailboxPath, flags.seen ? -1 : 1)
     }
 
@@ -232,37 +309,40 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   async moveMessage(uid, destPath) {
-    const accountId = get().selectedAccountId
-    const mailboxPath = get().selectedMailboxPath
-    if (!accountId || !mailboxPath) return
+    const moved = findDisplayedMessage(get(), uid)
+    if (!moved) return
+    const { accountId, mailboxPath } = moved
+    if (mailboxPath === destPath) return
     const k = key(accountId, mailboxPath)
-    const moved = get().messagesByKey[k]?.find((m) => m.uid === uid)
     const wasSelected = get().selectedUid === uid
+    const wasInSearch = Boolean(get().searchResults)
 
     // Optimistic removal from the source list — rolled back below if the
     // server-side move actually fails, instead of just leaving the message
     // looking vanished (it hadn't actually gone anywhere).
     set((s) => ({
       messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).filter((m) => m.uid !== uid) },
+      searchResults: withoutMessage(s.searchResults, mailboxPath, uid),
       selectedUid: wasSelected ? null : s.selectedUid
     }))
-    if (moved && !moved.flags.seen) {
+    if (!moved.flags.seen) {
       adjustUnreadCount(set, accountId, mailboxPath, -1)
     }
 
     try {
       await window.api.messages.move(accountId, mailboxPath, uid, destPath)
     } catch (err) {
-      if (moved) {
-        set((s) => ({
-          messagesByKey: { ...s.messagesByKey, [k]: [...(s.messagesByKey[k] ?? []), moved] },
-          selectedUid: wasSelected ? uid : s.selectedUid
-        }))
-        if (!moved.flags.seen) adjustUnreadCount(set, accountId, mailboxPath, 1)
-      }
-      window.alert(`Couldn't move that message: ${err instanceof Error ? err.message : String(err)}`)
+      set((s) => ({
+        messagesByKey: { ...s.messagesByKey, [k]: [...(s.messagesByKey[k] ?? []), moved] },
+        searchResults: wasInSearch ? [...(s.searchResults ?? []), moved] : s.searchResults,
+        selectedUid: wasSelected ? uid : s.selectedUid
+      }))
+      if (!moved.flags.seen) adjustUnreadCount(set, accountId, mailboxPath, 1)
+      set({ statusNotice: `Couldn't move that message: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
+
+    set({ statusNotice: `Moved to ${destPath}` })
 
     // The message gets a new UID in the destination mailbox, which we don't
     // know locally (IMAP MOVE/COPY doesn't hand it back in a form we parse
@@ -271,9 +351,9 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   async deleteMessage(uid) {
-    const accountId = get().selectedAccountId
-    const mailboxPath = get().selectedMailboxPath
-    if (!accountId || !mailboxPath) return
+    const removed = findDisplayedMessage(get(), uid)
+    if (!removed) return
+    const { accountId, mailboxPath } = removed
     const boxes = get().mailboxesByAccount[accountId] ?? []
     const trash = boxes.find((b) => b.specialUse === 'Trash')
     if (trash && trash.path !== mailboxPath) {
@@ -281,14 +361,14 @@ export const useMailStore = create<MailState>((set, get) => ({
       return
     }
     const k = key(accountId, mailboxPath)
-    const removed = get().messagesByKey[k]?.find((m) => m.uid === uid)
 
     set((s) => ({
       messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).filter((m) => m.uid !== uid) },
+      searchResults: withoutMessage(s.searchResults, mailboxPath, uid),
       selectedUid: s.selectedUid === uid ? null : s.selectedUid
     }))
 
-    if (removed && !removed.flags.seen) {
+    if (!removed.flags.seen) {
       adjustUnreadCount(set, accountId, mailboxPath, -1)
     }
 
