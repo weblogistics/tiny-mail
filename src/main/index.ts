@@ -1,4 +1,14 @@
 import { app, BrowserWindow } from 'electron'
+
+// Chromium has a built-in "auto dark mode for web content" pass that can
+// force-darken a page's painted pixels based on the OS/app theme,
+// independently of — and invisibly to — that page's own CSS. It was
+// silently fighting the reading pane's own light/dark rendering: toggling
+// a message back to "light" updated every CSS value correctly (confirmed
+// via computed style) but the message still rendered dark on screen,
+// because this pass sits below the CSS layer entirely. Must be set before
+// the app is ready.
+app.commandLine.appendSwitch('disable-features', 'WebContentsForceDark')
 import { createMainWindow } from './windows/mainWindow'
 import { AccountStore } from './accounts/accountStore'
 import { ImapService } from './imap/imapService'

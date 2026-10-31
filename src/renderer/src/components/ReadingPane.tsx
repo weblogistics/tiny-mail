@@ -17,7 +17,7 @@ import styles from './ReadingPane.module.css'
 // specifically cancels the effect for them so photos don't render as
 // negatives.
 const EMAIL_DARK_MODE_CSS = `
-  html { filter: invert(1) hue-rotate(180deg); background: #fff; }
+  html { filter: invert(1) hue-rotate(180deg); }
   img, svg, video, picture { filter: invert(1) hue-rotate(180deg); }
 `
 
@@ -117,7 +117,23 @@ export function ReadingPane(): JSX.Element {
     : []
 
   const srcDoc = sanitized
-    ? `<!doctype html><html><head><base target="_blank"><meta charset="utf-8"><style>
+    ? `<!doctype html><html><head><base target="_blank"><meta charset="utf-8"><meta name="color-scheme" content="light"><style>
+        /* Explicit white is the real baseline here, not a stylistic choice —
+           without it, body has no background at all (an iframe's canvas is
+           transparent by default, unlike a top-level page), so it was
+           showing the host app's own --reading-bg through underneath:
+           invisible-looking near-black-on-near-black in dark mode once the
+           per-message toggle switched email rendering back to "light".
+           The dark-mode filter below inverts this white to black, which is
+           the behavior that actually makes the toggle's two states correct
+           opposites of each other. The color-scheme meta tag is equally
+           load-bearing: without it, Chromium's own automatic dark-theming
+           for web content that doesn't declare a scheme kept re-darkening
+           this iframe underneath our filter-based toggle, fighting it
+           invisibly — "light" mode still rendered dark despite every one
+           of our own styles correctly saying otherwise.  */
+        html{color-scheme:light;}
+        html, body{background:#fff;}
         body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;color:#1d1d1f;margin:0;padding:16px;word-wrap:break-word;}
         img{max-width:100%;}
         a{color:#0a84ff;}
