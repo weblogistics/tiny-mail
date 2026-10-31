@@ -3,6 +3,7 @@ import { useMailStore } from '../store/useMailStore'
 import type { MessageAddress } from '@shared/types'
 import { sanitizeMessageHtml } from '../utils/sanitizeHtml'
 import { IconPaperclip } from './Icons'
+import { MessageActionBar } from './MessageActionBar'
 import styles from './ReadingPane.module.css'
 
 function addressList(addrs: MessageAddress[]): string {
@@ -68,6 +69,7 @@ export function ReadingPane(): JSX.Element {
 
   return (
     <div className={styles.pane}>
+      <MessageActionBar message={message} body={body} />
       <div className={styles.header}>
         <div className={styles.subjectRow}>
           <h1 className={styles.subject}>{message.subject || '(no subject)'}</h1>

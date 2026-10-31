@@ -4,6 +4,7 @@ import type {
   ComposeAttachment,
   ComposeDraft,
   ComposeSeed,
+  Contact,
   MailboxSummary,
   MailEventPayload,
   MessageBody,
@@ -55,6 +56,9 @@ export interface TinyMailApi {
     get(): Promise<AppSettings>
     update(patch: Partial<AppSettings>): Promise<AppSettings>
     openWindow(): Promise<void>
+  }
+  addressBook: {
+    search(query: string): Promise<Contact[]>
   }
   events: {
     subscribe(listener: (payload: MailEventPayload) => void): () => void

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AccountConfig, ComposeAttachment, ComposeDraft, ComposeMode } from '@shared/types'
 import { TrafficLights } from './components/TrafficLights'
 import { RichTextToolbar } from './components/RichTextToolbar'
+import { AddressField } from './components/AddressField'
 import { IconClose, IconPaperclip } from './components/Icons'
 import { extractInlineImages } from './utils/inlineImages'
 import { insertInlineImageFromFile } from './utils/insertInlineImage'
@@ -132,7 +133,7 @@ export function ComposeStandalone(): JSX.Element | null {
         )}
         <div className={styles.fieldRow}>
           <label>To:</label>
-          <input value={draft.to} onChange={(e) => update({ to: e.target.value })} autoFocus={!draft.to} />
+          <AddressField value={draft.to} onChange={(to) => update({ to })} autoFocus={!draft.to} />
           {!showCc && (
             <button className={styles.ccToggle} onClick={() => setShowCc(true)}>
               Cc/Bcc
@@ -143,11 +144,11 @@ export function ComposeStandalone(): JSX.Element | null {
           <>
             <div className={styles.fieldRow}>
               <label>Cc:</label>
-              <input value={draft.cc} onChange={(e) => update({ cc: e.target.value })} />
+              <AddressField value={draft.cc} onChange={(cc) => update({ cc })} />
             </div>
             <div className={styles.fieldRow}>
               <label>Bcc:</label>
-              <input value={draft.bcc} onChange={(e) => update({ bcc: e.target.value })} />
+              <AddressField value={draft.bcc} onChange={(bcc) => update({ bcc })} />
             </div>
           </>
         )}

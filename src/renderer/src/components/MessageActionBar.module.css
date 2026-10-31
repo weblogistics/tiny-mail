@@ -1,0 +1,50 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  border-right: 1px solid var(--border);
+  margin-right: 4px;
+}
+
+.group:last-of-type {
+  border-right: none;
+}
+
+.iconButton {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+}
+
+.iconButton:hover:not(:disabled) {
+  background: rgba(128, 128, 128, 0.14);
+}
+
+.iconButton:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.flagged {
+  color: var(--flag-color);
+}
+
+.spacer {
+  flex: 1;
+}

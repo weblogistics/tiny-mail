@@ -6,7 +6,9 @@ import type { AppSettings } from '@shared/types'
 const defaults: AppSettings = {
   markAsReadBehavior: 'instant',
   loadRemoteImagesByDefault: false,
-  syncIntervalSeconds: 60
+  syncMode: 'interval',
+  syncIntervalSeconds: 60,
+  groupByThread: false
 }
 
 export class SettingsStore {

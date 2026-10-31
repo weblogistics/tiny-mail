@@ -9,19 +9,6 @@
   border-bottom: 1px solid var(--border);
 }
 
-.group {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0 4px;
-  border-right: 1px solid var(--border);
-  margin-right: 4px;
-}
-
-.group:last-of-type {
-  border-right: none;
-}
-
 .iconButton {
   width: 30px;
   height: 30px;

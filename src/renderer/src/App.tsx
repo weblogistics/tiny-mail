@@ -16,18 +16,26 @@ export default function App(): JSX.Element {
 
   useKeyboardShortcuts()
 
+  const syncMode = useMailStore((s) => s.settings?.syncMode ?? 'interval')
   const syncIntervalSeconds = useMailStore((s) => s.settings?.syncIntervalSeconds ?? 60)
 
   useEffect(() => {
-    // Polling rather than IMAP IDLE: simpler and avoids issuing a second
-    // command on a connection that's mid-FETCH (see the sync deadlock fix).
+    // In 'push' mode the main process is already watching the selected
+    // mailbox via IMAP IDLE (see ImapService.watchForNewMail) and pushes a
+    // sync-progress event the moment new mail actually arrives, instead of
+    // waiting for a timer — so skip polling for messages, but still check
+    // less urgent things (mailbox list / unread counts across every
+    // folder, not just the one being watched) periodically, and fall back
+    // to a long-interval poll as a safety net in case IDLE silently died
+    // or the server doesn't support it.
+    const effectiveSeconds = syncMode === 'push' ? 300 : syncIntervalSeconds
     const interval = setInterval(() => {
       const state = useMailStore.getState()
       for (const account of state.accounts) state.refreshMailboxes(account.id)
-      state.syncSelectedMailbox()
-    }, syncIntervalSeconds * 1000)
+      if (syncMode !== 'push') state.syncSelectedMailbox()
+    }, effectiveSeconds * 1000)
     return () => clearInterval(interval)
-  }, [syncIntervalSeconds])
+  }, [syncMode, syncIntervalSeconds])
 
   return (
     <div className="app-shell">

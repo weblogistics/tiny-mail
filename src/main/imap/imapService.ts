@@ -1,4 +1,4 @@
-import { ImapFlow, type MailboxObject } from 'imapflow'
+import { ImapFlow, type ExistsEvent, type MailboxObject } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import type { AccountStore } from '../accounts/accountStore'
 import {
@@ -15,6 +15,7 @@ import {
 } from '../db/messageCache'
 import { analyzeBodyStructure } from './bodyStructure'
 import { resolveInlineImages } from './inlineImageResolver'
+import { indexContactsFromMessage } from '../db/contactsStore'
 import type {
   ConnectionSecurity,
   MailboxSummary,
@@ -71,11 +72,56 @@ function inferSpecialUseFromName(name: string): SpecialUse {
 
 export class ImapService {
   private clients = new Map<string, ImapFlow>()
+  // Guards against piling up overlapping syncMailbox() calls when the
+  // server's 'exists' push notification (new mail arriving) fires again
+  // before a previous resync has finished — queues at most one follow-up
+  // run rather than letting them stack.
+  private syncing = new Map<string, Promise<void>>()
+  private pendingResync = new Set<string>()
 
   constructor(
     private accountStore: AccountStore,
     private emit: Emit
   ) {}
+
+  // ImapFlow auto-enters IMAP IDLE on the connection's currently selected
+  // mailbox whenever it's been quiet for a bit (autoIdleDelay, 15s by
+  // default) and breaks it transparently the moment another command is
+  // issued — that's what makes "listen for push notifications while also
+  // issuing normal commands" safe here, unlike the earlier deadlock bug
+  // (which was from manually overlapping two *explicit* commands on a
+  // connection, not from IDLE itself). Wiring this costs nothing when the
+  // server never pushes anything, so it's always on rather than gated by
+  // a "push mode" setting — the setting instead controls whether the
+  // renderer's own poll timer runs (see App.tsx), since IDLE only covers
+  // whichever single mailbox is currently selected per account, not every
+  // folder at once.
+  private watchForNewMail(accountId: string, client: ImapFlow): void {
+    client.on('exists', (data: ExistsEvent) => {
+      if (data.count > data.prevCount) {
+        this.triggerResync(accountId, data.path)
+      }
+    })
+  }
+
+  private triggerResync(accountId: string, mailboxPath: string): void {
+    const key = `${accountId}::${mailboxPath}`
+    if (this.syncing.has(key)) {
+      this.pendingResync.add(key)
+      return
+    }
+    const run = async (): Promise<void> => {
+      try {
+        await this.syncMailbox(accountId, mailboxPath)
+      } catch (err) {
+        console.error('[imap] push-triggered resync failed', accountId, mailboxPath, err)
+      } finally {
+        this.syncing.delete(key)
+        if (this.pendingResync.delete(key)) this.triggerResync(accountId, mailboxPath)
+      }
+    }
+    this.syncing.set(key, run())
+  }
 
   private async getClient(accountId: string): Promise<ImapFlow> {
     const existing = this.clients.get(accountId)
@@ -114,6 +160,7 @@ export class ImapService {
 
     this.emit({ type: 'account-status', data: { accountId, status: 'online' } })
     this.clients.set(accountId, client)
+    this.watchForNewMail(accountId, client)
     return client
   }
 
@@ -182,6 +229,12 @@ export class ImapService {
       const start = Math.max(1, total - limit + 1)
       const range = `${start}:*`
 
+      // Only Inbox/Sent feed the compose autocomplete address book — other
+      // folders (drafts, trash, mailing-list archives) would pollute it
+      // with addresses that aren't real correspondents.
+      const specialUse = cachedListMailboxes(accountId).find((m) => m.path === mailboxPath)?.specialUse
+      const indexContacts = specialUse === 'Inbox' || specialUse === 'Sent'
+
       // A message's content (and so its snippet) never changes once fetched,
       // only its flags do. Re-downloading every snippet on every sync/poll
       // was both wasteful and, worse, visibly clobbered the cached preview
@@ -235,6 +288,7 @@ export class ImapService {
           pending.push({ uid: msg.uid, summary, snippetPartId })
         }
         upsertMessage(summary)
+        if (indexContacts) indexContactsFromMessage(summary)
       }
 
       // Phase 2: the FETCH command is closed now, so it's safe to issue

@@ -10,10 +10,11 @@
 
 .header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  height: 30px;
-  padding: 0 12px;
+  gap: 6px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 8px 0 12px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
@@ -21,9 +22,33 @@
   background: var(--list-bg-alt);
 }
 
+.headerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerSelect {
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 2px;
+}
+
+.headerSelect:hover {
+  color: var(--text-primary);
+}
+
+.headerSpacer {
+  flex: 1;
+}
+
 .syncing {
   font-weight: 400;
   color: var(--text-tertiary);
+  white-space: nowrap;
 }
 
 .scroll {
@@ -156,4 +181,61 @@
 
 .row.active .snippet {
   color: rgba(255, 255, 255, 0.75);
+}
+
+.indented {
+  padding-left: 28px;
+}
+
+.threadHeader {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--list-bg-alt);
+  background: var(--list-bg-alt);
+  color: var(--text-primary);
+}
+
+.threadHeader:hover {
+  background: rgba(128, 128, 128, 0.14);
+}
+
+.threadDisclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.threadSubject {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.threadHeader.unread .threadSubject {
+  font-weight: 700;
+}
+
+.threadCount {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 5px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--text-tertiary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

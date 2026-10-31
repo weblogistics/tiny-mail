@@ -58,6 +58,17 @@ export function getDb(): Database.Database {
       attachmentsJson TEXT DEFAULT '[]',
       PRIMARY KEY (accountId, mailboxPath, uid)
     );
+
+    -- Addresses seen in Inbox/Sent (From/To/Cc), indexed for compose
+    -- autocomplete. Global rather than per-account: you might email the
+    -- same contact from any of your accounts.
+    CREATE TABLE IF NOT EXISTS contacts (
+      address TEXT PRIMARY KEY,
+      name TEXT DEFAULT '',
+      lastSeen TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_contacts_lastSeen ON contacts (lastSeen DESC);
   `)
 
   ensureColumn(db, 'messages', 'ccJson', `ALTER TABLE messages ADD COLUMN ccJson TEXT DEFAULT '[]'`)

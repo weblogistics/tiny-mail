@@ -31,6 +31,8 @@ export const IpcChannels = {
   SettingsUpdate: 'settings:update',
   SettingsOpenWindow: 'settings:open-window',
 
+  AddressBookSearch: 'addressbook:search',
+
   WindowMinimize: 'window:minimize',
   WindowToggleMaximize: 'window:toggle-maximize',
   WindowClose: 'window:close',

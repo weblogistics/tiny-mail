@@ -21,10 +21,26 @@ export function GeneralSettingsTab(): JSX.Element {
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Checking for Mail</h3>
         <label className={styles.radioRow}>
-          Check every
+          <input
+            type="radio"
+            name="syncMode"
+            checked={settings.syncMode === 'push'}
+            onChange={() => update({ syncMode: 'push' })}
+          />
+          As they arrive
+        </label>
+        <label className={styles.radioRow}>
+          <input
+            type="radio"
+            name="syncMode"
+            checked={settings.syncMode === 'interval'}
+            onChange={() => update({ syncMode: 'interval' })}
+          />
+          Every
           <select
             className={styles.inlineSelect}
             value={settings.syncIntervalSeconds}
+            disabled={settings.syncMode !== 'interval'}
             onChange={(e) => update({ syncIntervalSeconds: Number(e.target.value) })}
           >
             <option value={30}>30 seconds</option>
@@ -34,6 +50,10 @@ export function GeneralSettingsTab(): JSX.Element {
             <option value={1800}>30 minutes</option>
           </select>
         </label>
+        <p className={styles.hint}>
+          "As they arrive" keeps a live connection open and shows new mail the moment the server
+          notifies Tiny Mail, for whichever mailbox you currently have open.
+        </p>
       </section>
 
       <section className={styles.section}>
@@ -56,6 +76,21 @@ export function GeneralSettingsTab(): JSX.Element {
           />
           Never mark messages as read automatically
         </label>
+      </section>
+
+      <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>Organization</h3>
+        <label className={styles.checkRow}>
+          <input
+            type="checkbox"
+            checked={settings.groupByThread}
+            onChange={(e) => update({ groupByThread: e.target.checked })}
+          />
+          Group messages by thread
+        </label>
+        <p className={styles.hint}>
+          Groups messages that share a subject into a single expandable conversation.
+        </p>
       </section>
 
       <section className={styles.section}>

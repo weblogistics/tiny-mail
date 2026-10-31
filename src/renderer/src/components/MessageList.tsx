@@ -1,16 +1,19 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import type { MessageSummary } from '@shared/types'
-import { IconFlagFilled, IconPaperclip } from './Icons'
-import { formatMessageDate } from '../utils/formatDate'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
+import { MessageRow } from './MessageRow'
+import { ThreadHeaderRow } from './ThreadHeaderRow'
+import {
+  FILTER_OPTIONS,
+  SORT_OPTIONS,
+  filterMessages,
+  getMessageComparator,
+  type MessageFilterKey,
+  type MessageSortKey
+} from '../utils/filterAndSortMessages'
+import { groupMessagesByThread } from '../utils/threadMessages'
 import styles from './MessageList.module.css'
-
-function senderLabel(msg: MessageSummary): string {
-  const from = msg.from[0]
-  if (!from) return '(unknown sender)'
-  return from.name || from.address
-}
 
 export function MessageList(): JSX.Element {
   const selectedAccountId = useMailStore((s) => s.selectedAccountId)
@@ -25,16 +28,59 @@ export function MessageList(): JSX.Element {
   const moveMessage = useMailStore((s) => s.moveMessage)
   const deleteMessage = useMailStore((s) => s.deleteMessage)
   const mailboxesByAccount = useMailStore((s) => s.mailboxesByAccount)
+  const groupByThread = useMailStore((s) => s.settings?.groupByThread ?? false)
   const [menu, setMenu] = useState<{ x: number; y: number; msg: MessageSummary } | null>(null)
+  const [filter, setFilter] = useState<MessageFilterKey>('all')
+  const [sort, setSort] = useState<MessageSortKey>('date-desc')
+  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set())
 
   const key = selectedAccountId && selectedMailboxPath ? `${selectedAccountId}::${selectedMailboxPath}` : null
-  const messages = searchResults ?? (key ? messagesByKey[key] ?? [] : [])
+  const rawMessages = searchResults ?? (key ? messagesByKey[key] ?? [] : [])
   const sync = key ? syncStatus[key] : undefined
   const syncing = sync && !sync.done
 
   const boxes = selectedAccountId ? mailboxesByAccount[selectedAccountId] ?? [] : []
   const archiveBox = boxes.find((b) => b.specialUse === 'Archive')
   const junkBox = boxes.find((b) => b.specialUse === 'Junk')
+
+  // Threading doesn't apply to search results — those are already a
+  // relevance-ish flat list spanning whatever matched, not a mailbox view.
+  const threadingActive = groupByThread && !searchResults
+
+  const filtered = useMemo(() => filterMessages(rawMessages, filter), [rawMessages, filter])
+
+  const items = useMemo(() => {
+    const comparator = getMessageComparator(sort)
+    if (!threadingActive) {
+      return filtered
+        .slice()
+        .sort(comparator)
+        .map((msg) => ({ kind: 'message' as const, msg }))
+    }
+    const threads = groupMessagesByThread(filtered)
+    return threads
+      .slice()
+      .sort((a, b) => comparator(a.messages[a.messages.length - 1], b.messages[b.messages.length - 1]))
+      .map((thread) =>
+        thread.messages.length === 1
+          ? { kind: 'message' as const, msg: thread.messages[0] }
+          : { kind: 'thread' as const, thread }
+      )
+  }, [filtered, sort, threadingActive])
+
+  const toggleThread = (key: string): void => {
+    setExpandedThreads((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const openMenu = (e: React.MouseEvent, msg: MessageSummary): void => {
+    e.preventDefault()
+    setMenu({ x: e.clientX, y: e.clientY, msg })
+  }
 
   const menuItems: ContextMenuItem[] = menu
     ? [
@@ -69,44 +115,63 @@ export function MessageList(): JSX.Element {
   return (
     <div className={styles.list}>
       <div className={styles.header}>
-        <span>{searchResults ? `Results for "${searchQuery}"` : 'Date'}</span>
+        {searchResults ? (
+          <span className={styles.headerLabel}>Results for "{searchQuery}"</span>
+        ) : (
+          <>
+            <select className={styles.headerSelect} value={filter} onChange={(e) => setFilter(e.target.value as MessageFilterKey)}>
+              {FILTER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <select className={styles.headerSelect} value={sort} onChange={(e) => setSort(e.target.value as MessageSortKey)}>
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        <span className={styles.headerSpacer} />
         {syncing && <span className={styles.syncing}>Updating… {sync.fetched}/{sync.total}</span>}
       </div>
       <div className={styles.scroll}>
-        {messages.length === 0 && (
+        {items.length === 0 && (
           <div className={styles.empty}>{searchResults ? 'No results' : 'No messages'}</div>
         )}
-        {messages.map((msg) => {
-          const active = msg.uid === selectedUid
+        {items.map((item) => {
+          if (item.kind === 'message') {
+            return (
+              <MessageRow
+                key={item.msg.uid}
+                msg={item.msg}
+                active={item.msg.uid === selectedUid}
+                draggable={!searchResults}
+                onClick={() => selectMessage(item.msg.uid)}
+                onContextMenu={(e) => openMenu(e, item.msg)}
+              />
+            )
+          }
+          const expanded = expandedThreads.has(item.thread.key)
           return (
-            <button
-              key={msg.uid}
-              className={`${styles.row} ${active ? styles.active : ''} ${!msg.flags.seen ? styles.unread : ''}`}
-              onClick={() => selectMessage(msg.uid)}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                setMenu({ x: e.clientX, y: e.clientY, msg })
-              }}
-              draggable={!searchResults}
-              onDragStart={(e) => {
-                e.dataTransfer.effectAllowed = 'move'
-                e.dataTransfer.setData('text/tiny-mail-uid', String(msg.uid))
-              }}
-            >
-              <span className={styles.dotColumn}>{!msg.flags.seen && <span className={styles.unreadDot} />}</span>
-              <span className={styles.main}>
-                <span className={styles.topLine}>
-                  <span className={styles.sender}>{senderLabel(msg)}</span>
-                  <span className={styles.date}>{formatMessageDate(msg.date)}</span>
-                </span>
-                <span className={styles.subjectLine}>
-                  {msg.flags.flagged && <IconFlagFilled width={11} height={11} className={styles.flagIcon} />}
-                  <span className={styles.subject}>{msg.subject || '(no subject)'}</span>
-                  {msg.hasAttachments && <IconPaperclip width={12} height={12} className={styles.attachIcon} />}
-                </span>
-                <span className={styles.snippet}>{msg.snippet}</span>
-              </span>
-            </button>
+            <div key={item.thread.key}>
+              <ThreadHeaderRow thread={item.thread} expanded={expanded} onToggle={() => toggleThread(item.thread.key)} />
+              {expanded &&
+                item.thread.messages.map((msg) => (
+                  <MessageRow
+                    key={msg.uid}
+                    msg={msg}
+                    active={msg.uid === selectedUid}
+                    draggable
+                    indent
+                    onClick={() => selectMessage(msg.uid)}
+                    onContextMenu={(e) => openMenu(e, msg)}
+                  />
+                ))}
+            </div>
           )
         })}
       </div>

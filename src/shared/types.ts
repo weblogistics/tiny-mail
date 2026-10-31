@@ -129,6 +129,11 @@ export interface ComposeAttachment {
   inline?: boolean
 }
 
+export interface Contact {
+  address: string
+  name: string
+}
+
 export interface SyncProgress {
   accountId: string
   mailboxPath: string
@@ -137,10 +142,20 @@ export interface SyncProgress {
   done: boolean
 }
 
+// 'interval' polls on a timer (syncIntervalSeconds); 'push' relies on the
+// IMAP server notifying the open connection as new mail arrives (IDLE),
+// skipping the timer entirely. Push only covers whichever mailbox is
+// currently open per account — the one you're looking at — not every
+// folder at once, since IMAP only lets one mailbox be selected per
+// connection at a time.
+export type SyncMode = 'interval' | 'push'
+
 export interface AppSettings {
   markAsReadBehavior: 'instant' | 'never'
   loadRemoteImagesByDefault: boolean
+  syncMode: SyncMode
   syncIntervalSeconds: number
+  groupByThread: boolean
 }
 
 export type MailEventPayload =

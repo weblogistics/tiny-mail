@@ -17,6 +17,7 @@ import { resolveImapTls, type ImapService } from '../imap/imapService'
 import type { SettingsStore } from '../settings/settingsStore'
 import { verifySmtpConfig, type SmtpService } from '../smtp/smtpService'
 import { searchMessages } from '../db/messageCache'
+import { searchContacts } from '../db/contactsStore'
 import { openComposeWindow, takeComposeInit } from '../windows/composeWindow'
 import { openSettingsWindow } from '../windows/settingsWindow'
 
@@ -226,6 +227,10 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.SettingsOpenWindow, () => {
     openSettingsWindow()
+  })
+
+  ipcMain.handle(IpcChannels.AddressBookSearch, (_e, query: string) => {
+    return searchContacts(query)
   })
 
   ipcMain.handle(IpcChannels.WindowMinimize, (e) => {

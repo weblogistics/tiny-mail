@@ -46,6 +46,9 @@ const api: TinyMailApi = {
     update: (patch) => ipcRenderer.invoke(IpcChannels.SettingsUpdate, patch),
     openWindow: () => ipcRenderer.invoke(IpcChannels.SettingsOpenWindow)
   },
+  addressBook: {
+    search: (query) => ipcRenderer.invoke(IpcChannels.AddressBookSearch, query)
+  },
   events: {
     subscribe: (listener) => {
       const handler = (_e: Electron.IpcRendererEvent, payload: unknown): void =>
