@@ -22,6 +22,7 @@ const api: TinyMailApi = {
   messages: {
     list: (accountId, mailboxPath) => ipcRenderer.invoke(IpcChannels.MessagesList, accountId, mailboxPath),
     search: (accountId, query) => ipcRenderer.invoke(IpcChannels.MessagesSearch, accountId, query),
+    searchServer: (accountId, query) => ipcRenderer.invoke(IpcChannels.MessagesSearchServer, accountId, query),
     getBody: (accountId, mailboxPath, uid) =>
       ipcRenderer.invoke(IpcChannels.MessagesGetBody, accountId, mailboxPath, uid),
     setFlags: (accountId, mailboxPath, uid, flags) =>

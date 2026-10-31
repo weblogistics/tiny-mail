@@ -28,9 +28,9 @@ let imapService: ImapService
 
 async function bootstrap(): Promise<void> {
   const accountStore = new AccountStore()
-  imapService = new ImapService(accountStore, broadcast)
-  const smtpService = new SmtpService(accountStore)
   const settingsStore = new SettingsStore()
+  imapService = new ImapService(accountStore, broadcast, settingsStore)
+  const smtpService = new SmtpService(accountStore)
 
   registerIpcHandlers(accountStore, imapService, smtpService, settingsStore)
   createMainWindow()

@@ -57,6 +57,32 @@ export function GeneralSettingsTab(): JSX.Element {
       </section>
 
       <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>Mailbox History</h3>
+        <label className={styles.radioRow}>
+          Download messages from the last
+          <select
+            className={styles.inlineSelect}
+            value={settings.syncLookbackDays}
+            onChange={(e) => update({ syncLookbackDays: Number(e.target.value) })}
+          >
+            <option value={1}>1 day</option>
+            <option value={3}>3 days</option>
+            <option value={7}>1 week</option>
+            <option value={14}>2 weeks</option>
+            <option value={30}>1 month</option>
+            <option value={90}>3 months</option>
+            <option value={180}>6 months</option>
+            <option value={365}>1 year</option>
+            <option value={0}>All mail</option>
+          </select>
+        </label>
+        <p className={styles.hint}>
+          Older messages stay on the server and won't appear in a mailbox until you search for
+          them, which always checks the server regardless of this setting.
+        </p>
+      </section>
+
+      <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Reading</h3>
         <label className={styles.radioRow}>
           <input

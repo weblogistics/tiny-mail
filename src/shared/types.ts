@@ -156,6 +156,9 @@ export interface AppSettings {
   syncMode: SyncMode
   syncIntervalSeconds: number
   groupByThread: boolean
+  // How far back to download message history per mailbox, in days.
+  // 0 means "All Mail" — no date cutoff, every message in the mailbox.
+  syncLookbackDays: number
 }
 
 export type MailEventPayload =

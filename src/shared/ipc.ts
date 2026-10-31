@@ -17,6 +17,7 @@ export const IpcChannels = {
   MessagesMove: 'messages:move',
   MessagesDelete: 'messages:delete',
   MessagesSearch: 'messages:search',
+  MessagesSearchServer: 'messages:search-server',
 
   MailSync: 'mail:sync',
   MailOpenAttachment: 'mail:open-attachment',

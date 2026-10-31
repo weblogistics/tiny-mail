@@ -8,7 +8,8 @@ const defaults: AppSettings = {
   loadRemoteImagesByDefault: false,
   syncMode: 'interval',
   syncIntervalSeconds: 60,
-  groupByThread: false
+  groupByThread: false,
+  syncLookbackDays: 30
 }
 
 export class SettingsStore {

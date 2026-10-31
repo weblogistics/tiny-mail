@@ -33,6 +33,7 @@ export function MessageList(): JSX.Element {
   const accounts = useMailStore((s) => s.accounts)
   const openCompose = useMailStore((s) => s.openCompose)
   const groupByThread = useMailStore((s) => s.settings?.groupByThread ?? false)
+  const isSearchingServer = useMailStore((s) => s.isSearchingServer)
   const [menu, setMenu] = useState<{ x: number; y: number; msg: MessageSummary } | null>(null)
   const [filter, setFilter] = useState<MessageFilterKey>('all')
   const [sort, setSort] = useState<MessageSortKey>('date-desc')
@@ -163,6 +164,7 @@ export function MessageList(): JSX.Element {
           </>
         )}
         <span className={styles.headerSpacer} />
+        {searchResults && isSearchingServer && <span className={styles.syncing}>Searching server…</span>}
         {syncing && <span className={styles.syncing}>Updating… {sync.fetched}/{sync.total}</span>}
       </div>
       <div className={styles.scroll}>

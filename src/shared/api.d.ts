@@ -32,6 +32,7 @@ export interface TinyMailApi {
   messages: {
     list(accountId: string, mailboxPath: string): Promise<MessageSummary[]>
     search(accountId: string, query: string): Promise<MessageSummary[]>
+    searchServer(accountId: string, query: string): Promise<MessageSummary[]>
     getBody(accountId: string, mailboxPath: string, uid: number): Promise<MessageBody>
     setFlags(
       accountId: string,

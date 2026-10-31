@@ -129,6 +129,13 @@ export function registerIpcHandlers(
     return searchMessages(accountId, query)
   })
 
+  ipcMain.handle(
+    IpcChannels.MessagesSearchServer,
+    async (_e, accountId: string, query: string): Promise<MessageSummary[]> => {
+      return imapService.searchServer(accountId, query)
+    }
+  )
+
   ipcMain.handle(IpcChannels.MailSync, async (_e, accountId: string, mailboxPath: string) => {
     try {
       await imapService.syncMailbox(accountId, mailboxPath)

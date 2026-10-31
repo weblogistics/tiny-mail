@@ -1,6 +1,7 @@
 import { ImapFlow, type ExistsEvent, type MailboxObject } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import type { AccountStore } from '../accounts/accountStore'
+import type { SettingsStore } from '../settings/settingsStore'
 import {
   clearMailboxMessages,
   getMessageBody,
@@ -47,6 +48,17 @@ const SPECIAL_USE_MAP: Record<string, SpecialUse> = {
   '\\Archive': 'Archive'
 }
 
+// Inbox/Archive/Sent/Drafts are overwhelmingly the most likely place a
+// search match lives; everything else (often dozens of per-sender filing
+// folders on a real account) is scanned only as time allows, in whatever
+// order the server listed it.
+const MAILBOX_SEARCH_PRIORITY: Record<string, number> = {
+  Inbox: 0,
+  Archive: 1,
+  Sent: 2,
+  Drafts: 3
+}
+
 function toAddresses(list?: { name?: string; address?: string }[]): MessageAddress[] {
   if (!list) return []
   return list.map((a) => ({ name: a.name || '', address: a.address || '' }))
@@ -81,7 +93,8 @@ export class ImapService {
 
   constructor(
     private accountStore: AccountStore,
-    private emit: Emit
+    private emit: Emit,
+    private settingsStore: SettingsStore
   ) {}
 
   // ImapFlow auto-enters IMAP IDLE on the connection's currently selected
@@ -215,19 +228,46 @@ export class ImapService {
     return cachedListMessages(accountId, mailboxPath)
   }
 
-  async syncMailbox(accountId: string, mailboxPath: string, limit = 200): Promise<void> {
+  // sinceDaysOverride lets a caller bypass the user's saved "how far back to
+  // sync" setting (settingsStore.syncLookbackDays); normal syncs always read
+  // the live setting instead, so changing it takes effect on the very next
+  // sync without an app restart.
+  async syncMailbox(accountId: string, mailboxPath: string, sinceDaysOverride?: number): Promise<void> {
     const client = await this.getClient(accountId)
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       const mailbox = client.mailbox as MailboxObject
-      const total = mailbox.exists
-      if (total === 0) {
+      const totalInMailbox = mailbox.exists
+      if (totalInMailbox === 0) {
         this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: 0, total: 0, done: true } })
         return
       }
 
-      const start = Math.max(1, total - limit + 1)
-      const range = `${start}:*`
+      const sinceDays = sinceDaysOverride ?? this.settingsStore.get().syncLookbackDays
+      // 0 means "All Mail": no date cutoff, fetch everything in the mailbox.
+      // Otherwise resolve the cutoff to a concrete UID set via SEARCH SINCE
+      // first (rather than handing the Date straight to fetch()) so `total`
+      // below reflects how many messages this sync actually covers, not the
+      // mailbox's full size.
+      let range: string | number[]
+      let total: number
+      let useUid: boolean
+      if (sinceDays > 0) {
+        const since = new Date()
+        since.setDate(since.getDate() - sinceDays)
+        const uids = (await client.search({ since }, { uid: true })) || []
+        if (uids.length === 0) {
+          this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: 0, total: 0, done: true } })
+          return
+        }
+        range = uids
+        total = uids.length
+        useUid = true
+      } else {
+        range = '1:*'
+        total = totalInMailbox
+        useUid = false
+      }
 
       // Only Inbox/Sent feed the compose autocomplete address book — other
       // folders (drafts, trash, mailing-list archives) would pollute it
@@ -260,7 +300,7 @@ export class ImapService {
       for await (const msg of client.fetch(
         range,
         { envelope: true, flags: true, bodyStructure: true, uid: true },
-        { uid: false }
+        { uid: useUid }
       )) {
         const { hasAttachments, snippetPartId } = analyzeBodyStructure(msg.bodyStructure as never)
         const existing = existingByUid.get(msg.uid)
@@ -323,6 +363,95 @@ export class ImapService {
     } finally {
       lock.release()
     }
+  }
+
+  // Local search (messageCache.searchMessages) only covers whatever's
+  // already synced — which is limited to the configured lookback window — so
+  // older mail that still exists on the server wouldn't turn up. This runs a
+  // real IMAP SEARCH across selectable mailboxes instead, matching subject
+  // and sender, and upserts whatever it finds into the cache so those
+  // messages become fully usable (open, flag, move...) immediately, the same
+  // as anything synced normally.
+  //
+  // Deliberately NOT searching message bodies: IMAP BODY search makes the
+  // server scan full message content rather than just headers, and on a real
+  // account with many folders (one test account here has 68) that pushed a
+  // single search past two minutes. A wall-clock budget bounds the worst
+  // case regardless of folder count — mailboxes are scanned in priority
+  // order (see MAILBOX_SEARCH_PRIORITY) so the budget is spent on the
+  // folders most likely to matter if it runs out before reaching them all.
+  async searchServer(accountId: string, query: string): Promise<MessageSummary[]> {
+    const trimmed = query.trim()
+    if (!trimmed) return []
+
+    const client = await this.getClient(accountId)
+    const mailboxes = cachedListMailboxes(accountId)
+      .filter((m) => !m.flags.includes('\\Noselect'))
+      .sort((a, b) => (MAILBOX_SEARCH_PRIORITY[a.specialUse ?? ''] ?? 99) - (MAILBOX_SEARCH_PRIORITY[b.specialUse ?? ''] ?? 99))
+    const MAX_RESULTS = 150
+    const TIME_BUDGET_MS = 12000
+    const deadline = Date.now() + TIME_BUDGET_MS
+    const results: MessageSummary[] = []
+
+    for (const mb of mailboxes) {
+      if (results.length >= MAX_RESULTS) break
+      if (Date.now() >= deadline) break
+      try {
+        const lock = await client.getMailboxLock(mb.path)
+        try {
+          const uids = await client.search({ or: [{ subject: trimmed }, { from: trimmed }] }, { uid: true })
+          if (!uids || !uids.length) continue
+
+          // IMAP SEARCH returns UIDs in ascending order, which tracks with
+          // arrival order per mailbox — taking the tail biases the cap
+          // towards the most recently received matches rather than the
+          // oldest ones.
+          const remaining = MAX_RESULTS - results.length
+          const slice = uids.slice(-remaining)
+          const indexContacts = mb.specialUse === 'Inbox' || mb.specialUse === 'Sent'
+          const existingByUid = new Map(cachedListMessages(accountId, mb.path).map((m) => [m.uid, m]))
+
+          for await (const msg of client.fetch(
+            slice,
+            { envelope: true, flags: true, bodyStructure: true, uid: true },
+            { uid: true }
+          )) {
+            const { hasAttachments } = analyzeBodyStructure(msg.bodyStructure as never)
+            const existing = existingByUid.get(msg.uid)
+            const summary: MessageSummary = {
+              accountId,
+              mailboxPath: mb.path,
+              uid: msg.uid,
+              messageId: msg.envelope?.messageId || '',
+              subject: msg.envelope?.subject || '(no subject)',
+              from: toAddresses(msg.envelope?.from),
+              to: toAddresses(msg.envelope?.to),
+              cc: toAddresses(msg.envelope?.cc),
+              date: (msg.envelope?.date || new Date()).toISOString(),
+              flags: {
+                seen: msg.flags?.has('\\Seen') ?? false,
+                flagged: msg.flags?.has('\\Flagged') ?? false,
+                answered: msg.flags?.has('\\Answered') ?? false,
+                draft: msg.flags?.has('\\Draft') ?? false,
+                deleted: msg.flags?.has('\\Deleted') ?? false
+              },
+              hasAttachments,
+              snippet: existing?.snippet ?? ''
+            }
+            upsertMessage(summary)
+            if (indexContacts) indexContactsFromMessage(summary)
+            results.push(summary)
+          }
+        } finally {
+          lock.release()
+        }
+      } catch (err) {
+        console.error('[imap] server search failed for mailbox', mb.path, err)
+      }
+    }
+
+    results.sort((a, b) => (a.date < b.date ? 1 : -1))
+    return results
   }
 
   // Attachment bytes aren't cached anywhere (only their metadata is, in

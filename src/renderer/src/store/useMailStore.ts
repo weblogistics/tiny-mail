@@ -14,6 +14,19 @@ function key(accountId: string, mailboxPath: string): string {
   return `${accountId}::${mailboxPath}`
 }
 
+function resultKey(m: MessageSummary): string {
+  return `${m.accountId}:${m.mailboxPath}:${m.uid}`
+}
+
+// Local search only covers whatever's already synced, so every keystroke
+// also schedules a real IMAP SEARCH across the server once typing pauses —
+// debounced (rather than fired per keystroke) since it's a live round trip
+// to the mail server, not a local cache lookup. Kept at module scope (not
+// store state) because it's pure plumbing for that debounce/cancellation,
+// not state any component needs to read.
+let serverSearchTimer: ReturnType<typeof setTimeout> | null = null
+let serverSearchToken = 0
+
 type SetFn = (
   partial: Partial<MailState> | ((state: MailState) => Partial<MailState>)
 ) => void
@@ -42,6 +55,7 @@ interface MailState {
   accountStatus: Record<string, 'connecting' | 'online' | 'offline' | 'error'>
   searchQuery: string
   searchResults: MessageSummary[] | null
+  isSearchingServer: boolean
   isAccountDialogOpen: boolean
   settings: AppSettings | null
 
@@ -79,6 +93,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   accountStatus: {},
   searchQuery: '',
   searchResults: null,
+  isSearchingServer: false,
   isAccountDialogOpen: false,
   settings: null,
 
@@ -283,16 +298,49 @@ export const useMailStore = create<MailState>((set, get) => ({
   async search(query) {
     const accountId = get().selectedAccountId
     set({ searchQuery: query })
-    if (!accountId || !query.trim()) {
-      set({ searchResults: null })
+    if (serverSearchTimer) clearTimeout(serverSearchTimer)
+
+    const trimmed = query.trim()
+    if (!accountId || !trimmed) {
+      serverSearchToken++
+      set({ searchResults: null, isSearchingServer: false })
       return
     }
-    const results = await window.api.messages.search(accountId, query)
+
+    const results = await window.api.messages.search(accountId, trimmed)
     set({ searchResults: results })
+
+    const myToken = ++serverSearchToken
+    serverSearchTimer = setTimeout(async () => {
+      set({ isSearchingServer: true })
+      try {
+        const serverResults = await window.api.messages.searchServer(accountId, trimmed)
+        // The query may have changed (or search may have been cleared)
+        // while this round trip was in flight — drop stale results.
+        if (myToken !== serverSearchToken) return
+        set((s) => {
+          const seen = new Set((s.searchResults ?? []).map(resultKey))
+          const merged = [...(s.searchResults ?? [])]
+          for (const m of serverResults) {
+            const k = resultKey(m)
+            if (!seen.has(k)) {
+              seen.add(k)
+              merged.push(m)
+            }
+          }
+          merged.sort((a, b) => (a.date < b.date ? 1 : -1))
+          return { searchResults: merged }
+        })
+      } finally {
+        if (myToken === serverSearchToken) set({ isSearchingServer: false })
+      }
+    }, 500)
   },
 
   clearSearch() {
-    set({ searchQuery: '', searchResults: null })
+    if (serverSearchTimer) clearTimeout(serverSearchTimer)
+    serverSearchToken++
+    set({ searchQuery: '', searchResults: null, isSearchingServer: false })
   },
 
   openCompose(mode, seed) {
