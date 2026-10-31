@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import { buildForwardSeed, buildReplySeed } from '../utils/quote'
+import { isOutgoingMailbox } from '../utils/isOutgoingMailbox'
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false
@@ -56,7 +57,9 @@ export function useKeyboardShortcuts(): void {
         e.preventDefault()
         const all = e.shiftKey
         const selfEmail = state.accounts.find((a) => a.id === state.selectedAccountId)?.email
-        state.openCompose(all ? 'replyAll' : 'reply', buildReplySeed(selected, body, selfEmail, all))
+        const boxes = state.selectedAccountId ? state.mailboxesByAccount[state.selectedAccountId] ?? [] : []
+        const isOutgoing = isOutgoingMailbox(boxes, selected.mailboxPath)
+        state.openCompose(all ? 'replyAll' : 'reply', buildReplySeed(selected, body, selfEmail, all, isOutgoing))
         return
       }
 

@@ -13,6 +13,8 @@ import {
   type MessageSortKey
 } from '../utils/filterAndSortMessages'
 import { groupMessagesByThread } from '../utils/threadMessages'
+import { buildForwardSeed, buildReplySeed } from '../utils/quote'
+import { isOutgoingMailbox } from '../utils/isOutgoingMailbox'
 import styles from './MessageList.module.css'
 
 export function MessageList(): JSX.Element {
@@ -28,6 +30,8 @@ export function MessageList(): JSX.Element {
   const moveMessage = useMailStore((s) => s.moveMessage)
   const deleteMessage = useMailStore((s) => s.deleteMessage)
   const mailboxesByAccount = useMailStore((s) => s.mailboxesByAccount)
+  const accounts = useMailStore((s) => s.accounts)
+  const openCompose = useMailStore((s) => s.openCompose)
   const groupByThread = useMailStore((s) => s.settings?.groupByThread ?? false)
   const [menu, setMenu] = useState<{ x: number; y: number; msg: MessageSummary } | null>(null)
   const [filter, setFilter] = useState<MessageFilterKey>('all')
@@ -42,6 +46,7 @@ export function MessageList(): JSX.Element {
   const boxes = selectedAccountId ? mailboxesByAccount[selectedAccountId] ?? [] : []
   const archiveBox = boxes.find((b) => b.specialUse === 'Archive')
   const junkBox = boxes.find((b) => b.specialUse === 'Junk')
+  const selfEmail = accounts.find((a) => a.id === selectedAccountId)?.email.toLowerCase()
 
   // Threading doesn't apply to search results — those are already a
   // relevance-ish flat list spanning whatever matched, not a mailbox view.
@@ -82,11 +87,33 @@ export function MessageList(): JSX.Element {
     setMenu({ x: e.clientX, y: e.clientY, msg })
   }
 
+  // Right-click Reply/Reply All/Forward act on whichever message was
+  // clicked, independent of what's currently open in the reading pane —
+  // so the quoted body is fetched directly rather than relying on
+  // selectMessage() having already cached it (the message may never have
+  // been opened at all).
+  const replyFromMenu = async (msg: MessageSummary, all: boolean): Promise<void> => {
+    if (!selectedAccountId) return
+    const body = await window.api.messages.getBody(selectedAccountId, msg.mailboxPath, msg.uid)
+    const isOutgoing = isOutgoingMailbox(boxes, msg.mailboxPath)
+    openCompose(all ? 'replyAll' : 'reply', buildReplySeed(msg, body, selfEmail, all, isOutgoing))
+  }
+
+  const forwardFromMenu = async (msg: MessageSummary): Promise<void> => {
+    if (!selectedAccountId) return
+    const body = await window.api.messages.getBody(selectedAccountId, msg.mailboxPath, msg.uid)
+    openCompose('forward', buildForwardSeed(msg, body))
+  }
+
   const menuItems: ContextMenuItem[] = menu
     ? [
+        { label: 'Reply', onSelect: () => replyFromMenu(menu.msg, false) },
+        { label: 'Reply All', onSelect: () => replyFromMenu(menu.msg, true) },
+        { label: 'Forward', onSelect: () => forwardFromMenu(menu.msg) },
         {
           label: menu.msg.flags.seen ? 'Mark as Unread' : 'Mark as Read',
-          onSelect: () => setFlags(menu.msg.uid, { seen: !menu.msg.flags.seen })
+          onSelect: () => setFlags(menu.msg.uid, { seen: !menu.msg.flags.seen }),
+          separatorBefore: true
         },
         {
           label: menu.msg.flags.flagged ? 'Remove Flag' : 'Flag',

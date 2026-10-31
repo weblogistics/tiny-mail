@@ -32,7 +32,11 @@ const api: TinyMailApi = {
       ipcRenderer.invoke(IpcChannels.MessagesDelete, accountId, mailboxPath, uid)
   },
   mail: {
-    sync: (accountId, mailboxPath) => ipcRenderer.invoke(IpcChannels.MailSync, accountId, mailboxPath)
+    sync: (accountId, mailboxPath) => ipcRenderer.invoke(IpcChannels.MailSync, accountId, mailboxPath),
+    openAttachment: (accountId, mailboxPath, uid, partId) =>
+      ipcRenderer.invoke(IpcChannels.MailOpenAttachment, accountId, mailboxPath, uid, partId),
+    saveAttachment: (accountId, mailboxPath, uid, partId) =>
+      ipcRenderer.invoke(IpcChannels.MailSaveAttachment, accountId, mailboxPath, uid, partId)
   },
   compose: {
     send: (draft) => ipcRenderer.invoke(IpcChannels.ComposeSend, draft),

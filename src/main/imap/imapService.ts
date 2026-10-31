@@ -325,19 +325,50 @@ export class ImapService {
     }
   }
 
+  // Attachment bytes aren't cached anywhere (only their metadata is, in
+  // MessageBody) — opening or saving one re-downloads and re-parses the
+  // full raw message. `partId` is this parse's attachment array index
+  // rather than a real IMAP BODYSTRUCTURE part specifier, which only
+  // works because both getMessageBody() and getAttachmentContent() go
+  // through this same helper: mailparser walks a message's MIME parts in
+  // a fixed, deterministic order, so re-parsing the identical bytes always
+  // reproduces the same attachments array in the same order.
+  private async downloadAndParse(
+    accountId: string,
+    mailboxPath: string,
+    uid: number
+  ): Promise<Awaited<ReturnType<typeof simpleParser>>> {
+    const client = await this.getClient(accountId)
+    const lock = await client.getMailboxLock(mailboxPath)
+    try {
+      const { content } = await client.download(String(uid), undefined, { uid: true })
+      return await simpleParser(content)
+    } finally {
+      lock.release()
+    }
+  }
+
+  async getAttachmentContent(
+    accountId: string,
+    mailboxPath: string,
+    uid: number,
+    partId: string
+  ): Promise<{ filename: string; contentType: string; content: Buffer }> {
+    const parsed = await this.downloadAndParse(accountId, mailboxPath, uid)
+    const attachment = (parsed.attachments || [])[Number(partId)]
+    if (!attachment) throw new Error(`Attachment part ${partId} not found on message ${uid}`)
+    return {
+      filename: attachment.filename || `attachment-${partId}`,
+      contentType: attachment.contentType,
+      content: attachment.content
+    }
+  }
+
   async getMessageBody(accountId: string, mailboxPath: string, uid: number): Promise<MessageBody> {
     const cached = getMessageBody(accountId, mailboxPath, uid)
     if (cached) return cached
 
-    const client = await this.getClient(accountId)
-    const lock = await client.getMailboxLock(mailboxPath)
-    let parsed: Awaited<ReturnType<typeof simpleParser>>
-    try {
-      const { content } = await client.download(String(uid), undefined, { uid: true })
-      parsed = await simpleParser(content)
-    } finally {
-      lock.release()
-    }
+    const parsed = await this.downloadAndParse(accountId, mailboxPath, uid)
 
     const attachments: MessageAttachment[] = (parsed.attachments || []).map((a, idx) => ({
       filename: a.filename || `attachment-${idx + 1}`,

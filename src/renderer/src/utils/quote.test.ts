@@ -58,6 +58,35 @@ describe('buildReplySeed', () => {
     expect(seed.html).toContain('Here are the numbers')
     expect(seed.html).toContain('Alice')
   })
+
+  describe('replying to a message in Sent/Drafts (isOutgoing)', () => {
+    // A message you sent has *you* as From — replying should address the
+    // original recipients (its To/Cc), not reply back to yourself.
+    const sentMessage: MessageSummary = {
+      ...baseMessage,
+      from: [{ name: 'Me', address: 'me@example.com' }],
+      to: [{ name: 'Alice', address: 'alice@example.com' }],
+      cc: [{ name: 'Bob', address: 'bob@example.com' }]
+    }
+
+    it('addresses the reply to the original recipient, not self', () => {
+      const seed = buildReplySeed(sentMessage, body, 'me@example.com', false, true)
+      expect(seed.to).toBe('alice@example.com')
+    })
+
+    it('reply-all includes the original cc, minus self, not the original to', () => {
+      const seed = buildReplySeed(sentMessage, body, 'me@example.com', true, true)
+      expect(seed.to).toBe('alice@example.com')
+      expect(seed.cc).toBe('bob@example.com')
+    })
+
+    it('defaults to non-outgoing behavior when the flag is omitted', () => {
+      // Guards the default parameter: existing call sites that don't pass
+      // isOutgoing should keep replying to From, not break silently.
+      const seed = buildReplySeed(baseMessage, body, 'me@example.com', false)
+      expect(seed.to).toBe('alice@example.com')
+    })
+  })
 })
 
 describe('buildForwardSeed', () => {

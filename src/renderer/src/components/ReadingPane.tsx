@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
-import type { MessageAddress } from '@shared/types'
+import type { MessageAddress, MessageAttachment } from '@shared/types'
 import { sanitizeMessageHtml } from '../utils/sanitizeHtml'
 import { IconPaperclip } from './Icons'
 import { MessageActionBar } from './MessageActionBar'
+import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import styles from './ReadingPane.module.css'
 
 function addressList(addrs: MessageAddress[]): string {
@@ -31,6 +32,8 @@ export function ReadingPane(): JSX.Element {
   const bodyCache = useMailStore((s) => s.bodyCache)
   const settings = useMailStore((s) => s.settings)
   const [allowRemoteImages, setAllowRemoteImages] = useState(false)
+  const [openingPartId, setOpeningPartId] = useState<string | null>(null)
+  const [attachMenu, setAttachMenu] = useState<{ x: number; y: number; attachment: MessageAttachment } | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
   const key = selectedAccountId && selectedMailboxPath ? `${selectedAccountId}::${selectedMailboxPath}` : null
@@ -58,6 +61,34 @@ export function ReadingPane(): JSX.Element {
       </div>
     )
   }
+
+  const handleOpenAttachment = async (a: MessageAttachment): Promise<void> => {
+    if (!selectedAccountId || !selectedMailboxPath) return
+    setOpeningPartId(a.partId)
+    try {
+      await window.api.mail.openAttachment(selectedAccountId, selectedMailboxPath, message.uid, a.partId)
+    } catch (err) {
+      window.alert(`Couldn't open "${a.filename}": ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setOpeningPartId(null)
+    }
+  }
+
+  const handleSaveAttachment = async (a: MessageAttachment): Promise<void> => {
+    if (!selectedAccountId || !selectedMailboxPath) return
+    try {
+      await window.api.mail.saveAttachment(selectedAccountId, selectedMailboxPath, message.uid, a.partId)
+    } catch (err) {
+      window.alert(`Couldn't save "${a.filename}": ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const attachMenuItems: ContextMenuItem[] = attachMenu
+    ? [
+        { label: 'Open', onSelect: () => handleOpenAttachment(attachMenu.attachment) },
+        { label: 'Save As…', onSelect: () => handleSaveAttachment(attachMenu.attachment) }
+      ]
+    : []
 
   const srcDoc = sanitized
     ? `<!doctype html><html><head><base target="_blank"><meta charset="utf-8"><style>
@@ -87,11 +118,23 @@ export function ReadingPane(): JSX.Element {
         {body && body.attachments.length > 0 && (
           <div className={styles.attachments}>
             {body.attachments.map((a) => (
-              <div key={a.partId} className={styles.attachmentChip}>
+              <button
+                key={a.partId}
+                className={styles.attachmentChip}
+                disabled={openingPartId === a.partId}
+                onClick={() => handleOpenAttachment(a)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setAttachMenu({ x: e.clientX, y: e.clientY, attachment: a })
+                }}
+                title={`Open ${a.filename}`}
+              >
                 <IconPaperclip width={13} height={13} />
                 <span className={styles.attachmentName}>{a.filename}</span>
-                <span className={styles.attachmentSize}>{formatBytes(a.size)}</span>
-              </div>
+                <span className={styles.attachmentSize}>
+                  {openingPartId === a.partId ? 'Opening…' : formatBytes(a.size)}
+                </span>
+              </button>
             ))}
           </div>
         )}
@@ -109,6 +152,9 @@ export function ReadingPane(): JSX.Element {
           <pre className={styles.plainBody}>{body?.text || ''}</pre>
         )}
       </div>
+      {attachMenu && (
+        <ContextMenu x={attachMenu.x} y={attachMenu.y} items={attachMenuItems} onClose={() => setAttachMenu(null)} />
+      )}
     </div>
   )
 }

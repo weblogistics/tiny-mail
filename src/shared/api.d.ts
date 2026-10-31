@@ -44,6 +44,8 @@ export interface TinyMailApi {
   }
   mail: {
     sync(accountId: string, mailboxPath: string): Promise<void>
+    openAttachment(accountId: string, mailboxPath: string, uid: number, partId: string): Promise<void>
+    saveAttachment(accountId: string, mailboxPath: string, uid: number, partId: string): Promise<void>
   }
   compose: {
     send(draft: ComposeDraft): Promise<void>

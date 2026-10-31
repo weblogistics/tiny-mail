@@ -19,7 +19,8 @@ export const IpcChannels = {
   MessagesSearch: 'messages:search',
 
   MailSync: 'mail:sync',
-  MailGetAttachment: 'mail:get-attachment',
+  MailOpenAttachment: 'mail:open-attachment',
+  MailSaveAttachment: 'mail:save-attachment',
 
   ComposeSend: 'compose:send',
   ComposeSaveDraft: 'compose:save-draft',

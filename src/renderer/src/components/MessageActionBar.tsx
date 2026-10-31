@@ -1,5 +1,6 @@
 import { useMailStore } from '../store/useMailStore'
 import { buildForwardSeed, buildReplySeed } from '../utils/quote'
+import { isOutgoingMailbox } from '../utils/isOutgoingMailbox'
 import type { MessageBody, MessageSummary } from '@shared/types'
 import {
   IconArchive,
@@ -33,7 +34,8 @@ export function MessageActionBar({ message, body }: MessageActionBarProps): JSX.
   const junkBox = boxes.find((b) => b.specialUse === 'Junk')
 
   const handleReply = (all: boolean): void => {
-    openCompose(all ? 'replyAll' : 'reply', buildReplySeed(message, body, selfEmail, all))
+    const isOutgoing = isOutgoingMailbox(boxes, message.mailboxPath)
+    openCompose(all ? 'replyAll' : 'reply', buildReplySeed(message, body, selfEmail, all, isOutgoing))
   }
 
   const handleForward = (): void => {

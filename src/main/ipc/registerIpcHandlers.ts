@@ -1,7 +1,7 @@
-import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { ipcMain, BrowserWindow, dialog, shell, app } from 'electron'
 import { ImapFlow } from 'imapflow'
-import { statSync } from 'fs'
-import { basename } from 'path'
+import { statSync, writeFileSync, mkdirSync, existsSync } from 'fs'
+import { basename, join } from 'path'
 import mime from 'mime-types'
 import { IpcChannels } from '@shared/ipc'
 import type {
@@ -142,6 +142,36 @@ export function registerIpcHandlers(
     IpcChannels.MessagesGetBody,
     async (_e, accountId: string, mailboxPath: string, uid: number) => {
       return imapService.getMessageBody(accountId, mailboxPath, uid)
+    }
+  )
+
+  // Mirrors how a real mail client handles double-clicking an attachment:
+  // drop a copy in a scratch directory and hand it to the OS's own default
+  // app for that file type, rather than showing our own viewer.
+  ipcMain.handle(
+    IpcChannels.MailOpenAttachment,
+    async (_e, accountId: string, mailboxPath: string, uid: number, partId: string) => {
+      const { filename, content } = await imapService.getAttachmentContent(accountId, mailboxPath, uid, partId)
+      const safeName = filename.replace(/[/\\?%*:|"<>]/g, '_')
+      const dir = join(app.getPath('temp'), 'tiny-mail-attachments', accountId, String(uid))
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+      const filePath = join(dir, safeName)
+      writeFileSync(filePath, content)
+      const openError = await shell.openPath(filePath)
+      if (openError) throw new Error(openError)
+    }
+  )
+
+  ipcMain.handle(
+    IpcChannels.MailSaveAttachment,
+    async (e, accountId: string, mailboxPath: string, uid: number, partId: string) => {
+      const { filename, content } = await imapService.getAttachmentContent(accountId, mailboxPath, uid, partId)
+      const win = BrowserWindow.fromWebContents(e.sender)
+      const result = win
+        ? await dialog.showSaveDialog(win, { defaultPath: filename })
+        : await dialog.showSaveDialog({ defaultPath: filename })
+      if (result.canceled || !result.filePath) return
+      writeFileSync(result.filePath, content)
     }
   )
 

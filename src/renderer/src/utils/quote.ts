@@ -41,11 +41,16 @@ export function buildReplySeed(
   message: MessageSummary,
   body: MessageBody | undefined,
   selfEmail: string | undefined,
-  all: boolean
+  all: boolean,
+  // True when `message` is sitting in Sent/Drafts, meaning its own From is
+  // you — the reply needs to go back to the original recipients instead.
+  isOutgoing = false
 ): Partial<ComposeDraft> {
-  const to = message.from.map((a) => a.address).join(', ')
+  const primary = isOutgoing ? message.to : message.from
+  const to = primary.map((a) => a.address).join(', ')
+  const secondary = isOutgoing ? message.cc : [...message.to, ...message.cc]
   const cc = all
-    ? [...message.to, ...message.cc]
+    ? secondary
         .map((a) => a.address)
         .filter((addr) => addr.toLowerCase() !== selfEmail?.toLowerCase())
         .join(', ')

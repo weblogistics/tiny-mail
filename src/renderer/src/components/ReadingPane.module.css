@@ -91,6 +91,17 @@
   background: var(--list-bg-alt);
   border: 1px solid var(--border);
   font-size: 12px;
+  text-align: left;
+}
+
+.attachmentChip:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.attachmentChip:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .attachmentName {
