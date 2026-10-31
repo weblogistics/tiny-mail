@@ -14,6 +14,7 @@ import {
   upsertMessage
 } from '../db/messageCache'
 import { analyzeBodyStructure } from './bodyStructure'
+import { resolveInlineImages } from './inlineImageResolver'
 import type {
   ConnectionSecurity,
   MailboxSummary,
@@ -293,11 +294,13 @@ export class ImapService {
       inline: a.contentDisposition === 'inline'
     }))
 
+    const rawHtml = typeof parsed.html === 'string' ? parsed.html : null
+
     const body: MessageBody = {
       accountId,
       mailboxPath,
       uid,
-      html: typeof parsed.html === 'string' ? parsed.html : null,
+      html: rawHtml ? resolveInlineImages(rawHtml, parsed.attachments || []) : null,
       text: parsed.text || null,
       attachments
     }

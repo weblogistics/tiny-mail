@@ -3,6 +3,8 @@ import type { AccountConfig, ComposeAttachment, ComposeDraft, ComposeMode } from
 import { TrafficLights } from './components/TrafficLights'
 import { RichTextToolbar } from './components/RichTextToolbar'
 import { IconClose, IconPaperclip } from './components/Icons'
+import { extractInlineImages } from './utils/inlineImages'
+import { insertInlineImageFromFile } from './utils/insertInlineImage'
 import styles from './ComposeStandalone.module.css'
 
 function emptyDraft(accountId: string): ComposeDraft {
@@ -57,7 +59,13 @@ export function ComposeStandalone(): JSX.Element | null {
   const update = (patch: Partial<ComposeDraft>): void => setDraft((d) => (d ? { ...d, ...patch } : d))
 
   const handleSend = async (): Promise<void> => {
-    const finalDraft = { ...draft, html: bodyRef.current?.innerHTML ?? draft.html }
+    const rawHtml = bodyRef.current?.innerHTML ?? draft.html
+    // Inline images live in the body as data: URLs so they render while
+    // composing; rewrite them to cid: references and pull their bytes out
+    // as attachments the SMTP layer sends as inline MIME parts.
+    const { html, attachments: inlineAttachments } = extractInlineImages(rawHtml)
+    const finalDraft = { ...draft, html, attachments: [...draft.attachments, ...inlineAttachments] }
+
     setSending(true)
     try {
       await window.api.compose.send(finalDraft)
@@ -74,8 +82,26 @@ export function ComposeStandalone(): JSX.Element | null {
     update({ attachments: [...draft.attachments, ...picked] })
   }
 
-  const removeAttachment = (path: string): void => {
-    update({ attachments: draft.attachments.filter((a: ComposeAttachment) => a.path !== path) })
+  const removeAttachment = (index: number): void => {
+    update({ attachments: draft.attachments.filter((_, i) => i !== index) })
+  }
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>): void => {
+    const imageItem = Array.from(e.clipboardData.items).find(
+      (item) => item.kind === 'file' && item.type.startsWith('image/')
+    )
+    if (!imageItem) return // not an image paste — let the default text/html paste happen
+    const file = imageItem.getAsFile()
+    if (!file) return
+    e.preventDefault()
+    insertInlineImageFromFile(file)
+  }
+
+  const handleBodyDrop = (e: React.DragEvent<HTMLDivElement>): void => {
+    const imageFiles = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'))
+    if (imageFiles.length === 0) return // not an image drop (e.g. dragging a message from the main window)
+    e.preventDefault()
+    for (const file of imageFiles) insertInlineImageFromFile(file)
   }
 
   return (
@@ -133,14 +159,14 @@ export function ComposeStandalone(): JSX.Element | null {
 
       {draft.attachments.length > 0 && (
         <div className={styles.attachments}>
-          {draft.attachments.map((a: ComposeAttachment) => (
-            <div key={a.path} className={styles.attachmentChip}>
+          {draft.attachments.map((a: ComposeAttachment, i: number) => (
+            <div key={a.path ?? i} className={styles.attachmentChip}>
               <IconPaperclip width={12} height={12} />
               <span className={styles.attachmentName}>{a.filename}</span>
               <span className={styles.attachmentSize}>{formatBytes(a.size)}</span>
               <button
                 className={styles.attachmentRemove}
-                onClick={() => removeAttachment(a.path)}
+                onClick={() => removeAttachment(i)}
                 aria-label={`Remove ${a.filename}`}
               >
                 <IconClose width={9} height={9} />
@@ -157,6 +183,11 @@ export function ComposeStandalone(): JSX.Element | null {
         className={styles.body}
         contentEditable
         suppressContentEditableWarning
+        onPaste={handlePaste}
+        onDragOver={(e) => {
+          if (Array.from(e.dataTransfer.items).some((i) => i.kind === 'file')) e.preventDefault()
+        }}
+        onDrop={handleBodyDrop}
         dangerouslySetInnerHTML={{ __html: initialHtml.current }}
       />
 

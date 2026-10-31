@@ -124,6 +124,30 @@
   outline-offset: -2px;
 }
 
+.disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  visibility: hidden;
+  border-radius: 3px;
+}
+
+.disclosureVisible {
+  visibility: visible;
+}
+
+.disclosure:hover {
+  background: rgba(128, 128, 128, 0.25);
+}
+
+.mailboxRow.active .disclosure {
+  color: var(--selection-text);
+}
+
 .mailboxIcon {
   display: flex;
   color: var(--accent);

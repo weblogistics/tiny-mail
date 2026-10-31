@@ -1,62 +1,12 @@
 import { useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import type { MailboxSummary } from '@shared/types'
-import {
-  IconArchive,
-  IconDraft,
-  IconFolderPlus,
-  IconGear,
-  IconInbox,
-  IconJunk,
-  IconMailbox,
-  IconSent,
-  IconTrash
-} from './Icons'
+import { buildMailboxTree } from '../utils/mailboxTree'
+import { IconFolderPlus, IconGear } from './Icons'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { PromptDialog } from './PromptDialog'
+import { MailboxTreeRow } from './MailboxTreeRow'
 import styles from './Sidebar.module.css'
-
-function mailboxIcon(mb: MailboxSummary): JSX.Element {
-  switch (mb.specialUse) {
-    case 'Inbox':
-      return <IconInbox width={15} height={15} />
-    case 'Sent':
-      return <IconSent width={15} height={15} />
-    case 'Drafts':
-      return <IconDraft width={15} height={15} />
-    case 'Trash':
-      return <IconTrash width={15} height={15} />
-    case 'Junk':
-      return <IconJunk width={15} height={15} />
-    case 'Archive':
-      return <IconArchive width={15} height={15} />
-    default:
-      return <IconMailbox width={15} height={15} />
-  }
-}
-
-function displayName(mb: MailboxSummary): string {
-  if (mb.specialUse === 'Inbox') return 'Inbox'
-  return mb.name
-}
-
-const SPECIAL_ORDER: Record<string, number> = {
-  Inbox: 0,
-  Drafts: 1,
-  Sent: 2,
-  Junk: 3,
-  Trash: 4,
-  Archive: 5
-}
-
-function sortMailboxes(boxes: MailboxSummary[]): MailboxSummary[] {
-  return [...boxes].sort((a, b) => {
-    const ra = a.specialUse ? SPECIAL_ORDER[a.specialUse] ?? 6 : 6
-    const rb = b.specialUse ? SPECIAL_ORDER[b.specialUse] ?? 6 : 6
-    if (ra !== rb) return ra - rb
-    return a.name.localeCompare(b.name)
-  })
-}
 
 export function Sidebar(): JSX.Element {
   const accounts = useMailStore((s) => s.accounts)
@@ -74,9 +24,19 @@ export function Sidebar(): JSX.Element {
   const moveMessage = useMailStore((s) => s.moveMessage)
   const [menu, setMenu] = useState<{ x: number; y: number; mb: MailboxSummary } | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   // Electron doesn't implement window.prompt() (it throws), so folder
   // naming goes through this in-app dialog instead.
   const [prompt, setPrompt] = useState<{ kind: 'new' | 'rename'; mb?: MailboxSummary } | null>(null)
+
+  const toggleCollapse = (path: string): void => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
 
   const handleNewMailbox = (accountId: string): void => {
     if (accountId !== selectedAccountId) selectAccount(accountId)
@@ -86,7 +46,7 @@ export function Sidebar(): JSX.Element {
   const menuItems: ContextMenuItem[] = menu
     ? [
         {
-          label: 'New Mailbox Inside…',
+          label: 'Add Subfolder…',
           onSelect: () => setPrompt({ kind: 'new', mb: menu.mb })
         },
         {
@@ -126,7 +86,7 @@ export function Sidebar(): JSX.Element {
     <div className={styles.sidebar}>
       <div className={styles.scroll}>
         {accounts.map((account) => {
-          const boxes = sortMailboxes(mailboxesByAccount[account.id] ?? [])
+          const tree = buildMailboxTree(mailboxesByAccount[account.id] ?? [])
           const status = accountStatus[account.id] ?? 'offline'
           return (
             <div key={account.id} className={styles.accountSection}>
@@ -144,46 +104,40 @@ export function Sidebar(): JSX.Element {
                 </div>
               )}
               <ul className={styles.mailboxList}>
-                {boxes.map((mb) => {
-                  const active = account.id === selectedAccountId && mb.path === selectedMailboxPath
-                  const isDropTarget = dropTarget === `${account.id}::${mb.path}`
-                  return (
-                    <li key={mb.path}>
-                      <button
-                        className={`${styles.mailboxRow} ${active ? styles.active : ''} ${isDropTarget ? styles.dropTarget : ''}`}
-                        onClick={() => {
-                          if (account.id !== selectedAccountId) selectAccount(account.id)
-                          selectMailbox(mb.path)
-                        }}
-                        onContextMenu={(e) => {
-                          e.preventDefault()
-                          if (account.id !== selectedAccountId) selectAccount(account.id)
-                          setMenu({ x: e.clientX, y: e.clientY, mb })
-                        }}
-                        onDragOver={(e) => {
-                          if (account.id !== selectedAccountId || mb.path === selectedMailboxPath) return
-                          e.preventDefault()
-                          setDropTarget(`${account.id}::${mb.path}`)
-                        }}
-                        onDragLeave={() => setDropTarget(null)}
-                        onDrop={(e) => {
-                          e.preventDefault()
-                          setDropTarget(null)
-                          const uid = Number(e.dataTransfer.getData('text/tiny-mail-uid'))
-                          if (!Number.isNaN(uid) && account.id === selectedAccountId) {
-                            moveMessage(uid, mb.path)
-                          }
-                        }}
-                      >
-                        <span className={styles.mailboxIcon}>{mailboxIcon(mb)}</span>
-                        <span className={styles.mailboxName}>{displayName(mb)}</span>
-                        {mb.unreadCount > 0 && (
-                          <span className={`${styles.badge} ${active ? styles.badgeActive : ''}`}>{mb.unreadCount}</span>
-                        )}
-                      </button>
-                    </li>
-                  )
-                })}
+                {tree.map((node) => (
+                  <MailboxTreeRow
+                    key={node.mb.path}
+                    node={node}
+                    depth={0}
+                    activePath={account.id === selectedAccountId ? selectedMailboxPath : null}
+                    collapsed={collapsed}
+                    dropTarget={account.id === selectedAccountId ? dropTarget : null}
+                    onToggleCollapse={toggleCollapse}
+                    onSelect={(mb) => {
+                      if (account.id !== selectedAccountId) selectAccount(account.id)
+                      selectMailbox(mb.path)
+                    }}
+                    onContextMenu={(e, mb) => {
+                      e.preventDefault()
+                      if (account.id !== selectedAccountId) selectAccount(account.id)
+                      setMenu({ x: e.clientX, y: e.clientY, mb })
+                    }}
+                    onDragOver={(e, mb) => {
+                      if (account.id !== selectedAccountId || mb.path === selectedMailboxPath) return
+                      e.preventDefault()
+                      setDropTarget(mb.path)
+                    }}
+                    onDragLeave={() => setDropTarget(null)}
+                    onDrop={(e, mb) => {
+                      e.preventDefault()
+                      setDropTarget(null)
+                      const uid = Number(e.dataTransfer.getData('text/tiny-mail-uid'))
+                      if (!Number.isNaN(uid) && account.id === selectedAccountId) {
+                        moveMessage(uid, mb.path)
+                      }
+                    }}
+                  />
+                ))}
               </ul>
               {accounts.length === 1 && (
                 <button className={styles.newMailboxLink} onClick={() => handleNewMailbox(account.id)}>
@@ -208,7 +162,7 @@ export function Sidebar(): JSX.Element {
 
       {prompt?.kind === 'new' && (
         <PromptDialog
-          title={prompt.mb ? `New Mailbox Inside "${prompt.mb.name}"` : 'New Mailbox'}
+          title={prompt.mb ? `Add Subfolder to "${prompt.mb.name}"` : 'New Mailbox'}
           label="Name:"
           confirmLabel="Create"
           onSubmit={(name) => {

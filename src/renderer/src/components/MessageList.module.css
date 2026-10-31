@@ -133,7 +133,7 @@
 }
 
 .flagIcon {
-  color: var(--flag-orange);
+  color: var(--flag-color);
   flex-shrink: 0;
 }
 

@@ -192,6 +192,14 @@ export const IconClearFormat = (p: IconProps) => (
   </svg>
 )
 
+export const IconImage = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+    <circle cx="8.5" cy="9.5" r="1.6" />
+    <path d="M4 17l5.5-5.5a1.5 1.5 0 0 1 2.1 0L16 16M14.5 14.5l1.8-1.8a1.5 1.5 0 0 1 2.1 0l1.6 1.6" />
+  </svg>
+)
+
 export const IconGear = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="3.2" />

@@ -2,12 +2,25 @@ import nodemailer, { type Transporter } from 'nodemailer'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const MailComposer = require('nodemailer/lib/mail-composer')
 import type { AccountStore } from '../accounts/accountStore'
-import type { AccountConfig, ComposeDraft, ConnectionSecurity } from '@shared/types'
+import type { AccountConfig, ComposeAttachment, ComposeDraft, ConnectionSecurity } from '@shared/types'
 
 function resolveTls(security: ConnectionSecurity): { secure: boolean; requireTLS: boolean; ignoreTLS: boolean } {
   if (security === 'ssl') return { secure: true, requireTLS: false, ignoreTLS: false }
   if (security === 'starttls') return { secure: false, requireTLS: true, ignoreTLS: false }
   return { secure: false, requireTLS: false, ignoreTLS: true }
+}
+
+// A regular attachment (from "Attach File") has `path`; an inline image
+// (from the rich-text toolbar's Insert Image) instead has `contentBase64`
+// and a `cid` that the compose HTML already references as `cid:<cid>`.
+function toNodemailerAttachments(attachments: ComposeAttachment[]): Record<string, unknown>[] {
+  return attachments.map((a) => ({
+    filename: a.filename,
+    contentType: a.contentType,
+    ...(a.path ? { path: a.path } : {}),
+    ...(a.contentBase64 ? { content: a.contentBase64, encoding: 'base64' } : {}),
+    ...(a.cid ? { cid: a.cid, contentDisposition: 'inline' as const } : {})
+  }))
 }
 
 export async function verifySmtpConfig(
@@ -71,11 +84,7 @@ export class SmtpService {
       html: draft.html,
       inReplyTo: draft.inReplyTo,
       references: draft.references,
-      attachments: draft.attachments.map((a) => ({
-        filename: a.filename,
-        path: a.path,
-        contentType: a.contentType
-      }))
+      attachments: toNodemailerAttachments(draft.attachments)
     })
   }
 
@@ -92,11 +101,7 @@ export class SmtpService {
       html: draft.html,
       inReplyTo: draft.inReplyTo,
       references: draft.references,
-      attachments: draft.attachments.map((a) => ({
-        filename: a.filename,
-        path: a.path,
-        contentType: a.contentType
-      }))
+      attachments: toNodemailerAttachments(draft.attachments)
     })
 
     return new Promise((resolve, reject) => {

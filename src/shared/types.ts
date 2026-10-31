@@ -116,8 +116,17 @@ export interface ComposeSeed {
 export interface ComposeAttachment {
   filename: string
   contentType: string
-  path: string
   size: number
+  // A regular "attach a file" entry has `path` pointing at a file on disk.
+  // An inline image inserted into the compose body instead carries its
+  // bytes directly as `contentBase64` (there's no file — it came from a
+  // data: URL the user pasted/inserted) plus a `cid` that the HTML
+  // references via `cid:<cid>` so the mail client renders it inline rather
+  // than listing it as a separate attachment.
+  path?: string
+  contentBase64?: string
+  cid?: string
+  inline?: boolean
 }
 
 export interface SyncProgress {

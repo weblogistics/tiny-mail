@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconBulletList, IconClearFormat, IconLink, IconNumberedList } from './Icons'
+import { IconBulletList, IconClearFormat, IconImage, IconLink, IconNumberedList } from './Icons'
 import { PromptDialog } from './PromptDialog'
+import { insertInlineImageFromFile } from '../utils/insertInlineImage'
 import styles from './RichTextToolbar.module.css'
 
 interface RichTextToolbarProps {
@@ -44,6 +45,7 @@ export function RichTextToolbar({ targetRef }: RichTextToolbarProps): JSX.Elemen
   const [active, setActive] = useState<ActiveState>(emptyState)
   const [showLinkPrompt, setShowLinkPrompt] = useState(false)
   const savedRange = useRef<Range | null>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const update = (): void => {
@@ -72,26 +74,48 @@ export function RichTextToolbar({ targetRef }: RichTextToolbarProps): JSX.Elemen
     if (targetRef.current) setActive(readActiveState(targetRef.current))
   }
 
-  const runLink = (e: React.MouseEvent): void => {
-    e.preventDefault()
-    // Electron doesn't implement window.prompt(), so this needs an in-app
-    // dialog instead — which means an async gap during which the body's
-    // text selection would otherwise be lost (focus moves to the dialog).
-    // Save it now, while it's still live, and restore it on submit.
+  // Both the custom link dialog and the native file picker steal focus away
+  // from the compose body, which would otherwise collapse its text
+  // selection/caret before we get a chance to act on it. Save it first and
+  // restore it right before the insertion so execCommand still has
+  // somewhere to insert into.
+  const saveSelection = (): void => {
     const selection = window.getSelection()
     savedRange.current = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null
-    setShowLinkPrompt(true)
   }
 
-  const submitLink = (url: string): void => {
-    setShowLinkPrompt(false)
+  const restoreSelection = (): void => {
     targetRef.current?.focus()
     if (savedRange.current) {
       const selection = window.getSelection()
       selection?.removeAllRanges()
       selection?.addRange(savedRange.current)
     }
+  }
+
+  const runLink = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    saveSelection()
+    setShowLinkPrompt(true)
+  }
+
+  const submitLink = (url: string): void => {
+    setShowLinkPrompt(false)
+    restoreSelection()
     exec('createLink', url)
+  }
+
+  const runInsertImage = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    saveSelection()
+    imageInputRef.current?.click()
+  }
+
+  const handleImageSelected = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow picking the same file again later
+    if (!file) return
+    insertInlineImageFromFile(file, restoreSelection)
   }
 
   const cls = (isActive: boolean): string => `${styles.btn} ${isActive ? styles.active : ''}`
@@ -126,9 +150,19 @@ export function RichTextToolbar({ targetRef }: RichTextToolbarProps): JSX.Elemen
       <button className={styles.btn} title="Link" onMouseDown={runLink}>
         <IconLink width={15} height={15} />
       </button>
+      <button className={styles.btn} title="Insert Image" onMouseDown={runInsertImage}>
+        <IconImage width={15} height={15} />
+      </button>
       <button className={styles.btn} title="Remove Formatting" onMouseDown={run('removeFormat')}>
         <IconClearFormat width={15} height={15} />
       </button>
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={handleImageSelected}
+      />
 
       {showLinkPrompt && (
         <PromptDialog
