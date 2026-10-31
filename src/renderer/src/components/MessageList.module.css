@@ -70,6 +70,7 @@
   padding: 8px 12px 9px;
   text-align: left;
   border-bottom: 1px solid var(--list-bg-alt);
+  position: relative;
 }
 
 .row:hover {
@@ -78,6 +79,13 @@
 
 .row.active {
   background: var(--selection-bg);
+}
+
+/* An inset box-shadow (rather than border-left) so the stripe doesn't
+   shift the row's existing padding/alignment, including for indented
+   rows inside an expanded thread. */
+.flaggedRow {
+  box-shadow: inset 4px 0 0 var(--flag-color);
 }
 
 .dotColumn {

@@ -14,11 +14,14 @@ export function ThreadHeaderRow({ thread, expanded, onToggle }: ThreadHeaderRowP
   const anyFlagged = thread.messages.some((m) => m.flags.flagged)
 
   return (
-    <button className={`${styles.threadHeader} ${unreadCount > 0 ? styles.unread : ''}`} onClick={onToggle}>
+    <button
+      className={`${styles.threadHeader} ${unreadCount > 0 ? styles.unread : ''} ${anyFlagged ? styles.flaggedRow : ''}`}
+      onClick={onToggle}
+    >
       <span className={styles.threadDisclosure}>
         {expanded ? <IconChevronDown width={11} height={11} /> : <IconChevronRight width={11} height={11} />}
       </span>
-      {anyFlagged && <IconFlagFilled width={11} height={11} className={styles.flagIcon} />}
+      {anyFlagged && <IconFlagFilled width={14} height={14} className={styles.flagIcon} />}
       <span className={styles.threadSubject}>{latest.subject || '(no subject)'}</span>
       <span className={styles.threadCount}>{thread.messages.length}</span>
     </button>
