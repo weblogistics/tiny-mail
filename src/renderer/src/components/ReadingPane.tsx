@@ -6,6 +6,7 @@ import { IconAlertTriangle, IconMoon, IconPaperclip, IconSun } from './Icons'
 import { MessageActionBar } from './MessageActionBar'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { MessageHeadersDialog } from './MessageHeadersDialog'
+import { BulkActionPanel } from './BulkActionPanel'
 import { useSystemColorScheme } from '../hooks/useSystemColorScheme'
 import styles from './ReadingPane.module.css'
 
@@ -51,6 +52,7 @@ export function ReadingPane(): JSX.Element {
   const selectedAccountId = useMailStore((s) => s.selectedAccountId)
   const selectedMailboxPath = useMailStore((s) => s.selectedMailboxPath)
   const selectedUid = useMailStore((s) => s.selectedUid)
+  const selectedUids = useMailStore((s) => s.selectedUids)
   const messagesByKey = useMailStore((s) => s.messagesByKey)
   const searchResults = useMailStore((s) => s.searchResults)
   const bodyCache = useMailStore((s) => s.bodyCache)
@@ -103,6 +105,14 @@ export function ReadingPane(): JSX.Element {
     if (!body?.html) return null
     return sanitizeMessageHtml(body.html, allowRemoteImages)
   }, [body?.html, allowRemoteImages])
+
+  if (selectedUids.size > 1) {
+    return (
+      <div className={styles.pane}>
+        <BulkActionPanel />
+      </div>
+    )
+  }
 
   if (!message) {
     return (

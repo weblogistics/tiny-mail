@@ -8,6 +8,7 @@ function box(path: string, overrides: Partial<MailboxSummary> = {}): MailboxSumm
     path,
     name: path.split('.').pop() || path,
     specialUse: null,
+    specialUseFromServer: false,
     unreadCount: 0,
     totalCount: 0,
     flags: [],
@@ -27,9 +28,9 @@ describe('resolveMailboxRole', () => {
     expect(resolveMailboxRole(boxes, 'Archive')).toBeUndefined()
   })
 
-  it('prefers the shallower (more top-level) folder among same-role candidates', () => {
-    // Exactly the real-world case this was built for: a top-level "Sent"
-    // plus a per-correspondent "Sent" nested under another folder.
+  it('prefers the shallower (more top-level) folder when neither candidate has a real server flag', () => {
+    // Both name-guessed only (specialUseFromServer defaults to false in the
+    // box() helper here) — the depth tie-break is what's actually deciding.
     const boxes = [
       box('INBOX.David Jeffrey.Sent', { specialUse: 'Sent', name: 'Sent' }),
       box('Sent', { specialUse: 'Sent' })
@@ -39,6 +40,28 @@ describe('resolveMailboxRole', () => {
 
   it('tie-breaks same-depth candidates by shorter path, then alphabetically', () => {
     const boxes = [box('Sent Messages', { specialUse: 'Sent' }), box('Sent', { specialUse: 'Sent' })]
+    expect(resolveMailboxRole(boxes, 'Sent')?.path).toBe('Sent')
+  })
+
+  it('a real server SPECIAL-USE flag wins outright over a shallower name-guessed look-alike', () => {
+    // The actual bug this was built to fix, reproduced from a real account:
+    // the server's genuine \Sent flag was on a deeply nested per-
+    // correspondent folder, while shallower "Sent" and "Sent Messages"
+    // folders existed too, purely by naming coincidence, with no real flag
+    // at all. Depth must never override an authoritative server answer.
+    const boxes = [
+      box('INBOX.David Jeffrey.Sent', { specialUse: 'Sent', specialUseFromServer: true, name: 'Sent' }),
+      box('Sent', { specialUse: 'Sent' }),
+      box('Sent Messages', { specialUse: 'Sent' })
+    ]
+    expect(resolveMailboxRole(boxes, 'Sent')?.path).toBe('INBOX.David Jeffrey.Sent')
+  })
+
+  it('tie-breaks by depth among multiple real-flagged candidates too, if a server somehow sends more than one', () => {
+    const boxes = [
+      box('INBOX.David Jeffrey.Sent', { specialUse: 'Sent', specialUseFromServer: true, name: 'Sent' }),
+      box('Sent', { specialUse: 'Sent', specialUseFromServer: true })
+    ]
     expect(resolveMailboxRole(boxes, 'Sent')?.path).toBe('Sent')
   })
 

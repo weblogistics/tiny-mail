@@ -209,6 +209,32 @@ export function registerIpcHandlers(
     }
   )
 
+  ipcMain.handle(
+    IpcChannels.MessagesBulkSetFlags,
+    async (_e, accountId: string, mailboxPath: string, uids: number[], flags: Partial<MessageSummary['flags']>) => {
+      await imapService.setFlagsMany(accountId, mailboxPath, uids, flags)
+    }
+  )
+
+  ipcMain.handle(
+    IpcChannels.MessagesBulkMove,
+    async (_e, accountId: string, mailboxPath: string, uids: number[], destPath: string) => {
+      try {
+        await imapService.moveMessages(accountId, mailboxPath, uids, destPath)
+      } catch (err) {
+        console.error('[messages:bulk-move] failed', { accountId, mailboxPath, count: uids.length, destPath }, err)
+        throw err
+      }
+    }
+  )
+
+  ipcMain.handle(
+    IpcChannels.MessagesBulkDelete,
+    async (_e, accountId: string, mailboxPath: string, uids: number[]) => {
+      await imapService.deleteMessages(accountId, mailboxPath, uids)
+    }
+  )
+
   ipcMain.handle(IpcChannels.ComposeSend, async (_e, draft: ComposeDraft) => {
     await smtpService.send(draft)
 

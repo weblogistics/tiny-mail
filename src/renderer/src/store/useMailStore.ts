@@ -15,7 +15,7 @@ function key(accountId: string, mailboxPath: string): string {
   return `${accountId}::${mailboxPath}`
 }
 
-function resultKey(m: MessageSummary): string {
+export function resultKey(m: MessageSummary): string {
   return `${m.accountId}:${m.mailboxPath}:${m.uid}`
 }
 
@@ -34,6 +34,35 @@ function findDisplayedMessage(state: MailState, uid: number): MessageSummary | u
 
 function withoutMessage(list: MessageSummary[] | null, mailboxPath: string, uid: number): MessageSummary[] | null {
   return list?.filter((m) => !(m.mailboxPath === mailboxPath && m.uid === uid)) ?? null
+}
+
+// Multi-select (Ctrl/Cmd-click, Shift-click, "select all") is tracked
+// separately from selectedUid (the single message shown in the reading
+// pane) and keyed the same way search results are — a bulk selection can
+// in principle span mailboxes, same reasoning as findDisplayedMessage.
+function findDisplayedMessagesByKeys(state: MailState, keys: Set<string>): MessageSummary[] {
+  if (keys.size === 0) return []
+  const source = state.searchResults ?? (state.selectedAccountId && state.selectedMailboxPath
+    ? state.messagesByKey[key(state.selectedAccountId, state.selectedMailboxPath)] ?? []
+    : [])
+  return source.filter((m) => keys.has(resultKey(m)))
+}
+
+// Bulk actions group selected messages by (accountId, mailboxPath) before
+// calling the server — almost always one group in practice (a selection
+// is normally made within a single mailbox view), but search results can
+// span mailboxes, and grouping costs nothing when there's only one group.
+function groupByMailbox(
+  messages: MessageSummary[]
+): Map<string, { accountId: string; mailboxPath: string; uids: number[] }> {
+  const groups = new Map<string, { accountId: string; mailboxPath: string; uids: number[] }>()
+  for (const m of messages) {
+    const gk = key(m.accountId, m.mailboxPath)
+    const existing = groups.get(gk)
+    if (existing) existing.uids.push(m.uid)
+    else groups.set(gk, { accountId: m.accountId, mailboxPath: m.mailboxPath, uids: [m.uid] })
+  }
+  return groups
 }
 
 // Local search only covers whatever's already synced, so every keystroke
@@ -74,6 +103,12 @@ interface MailState {
   searchQuery: string
   searchResults: MessageSummary[] | null
   isSearchingServer: boolean
+  // Bulk selection, independent of selectedUid (the single message shown in
+  // the reading pane) — a plain click sets selectedUid and clears this; a
+  // Ctrl/Cmd-click, Shift-click or "select all" populates this without
+  // touching selectedUid, and the reading pane switches to a bulk-action
+  // summary instead of a single message whenever this holds more than one.
+  selectedUids: Set<string>
   isAccountDialogOpen: boolean
   settings: AppSettings | null
   // Set the instant a manual "Get Mail" starts, so the status bar reacts to
@@ -96,6 +131,12 @@ interface MailState {
   setFlags(uid: number, flags: Partial<MessageSummary['flags']>): Promise<void>
   moveMessage(uid: number, destPath: string): Promise<void>
   deleteMessage(uid: number): Promise<void>
+  toggleMultiSelect(msg: MessageSummary): void
+  setMultiSelection(keys: string[]): void
+  clearMultiSelection(): void
+  bulkSetFlags(flags: Partial<MessageSummary['flags']>): Promise<void>
+  bulkMove(destPath: string): Promise<void>
+  bulkDelete(): Promise<void>
   getMail(): Promise<void>
   setStatusNotice(notice: string | null): void
   search(query: string): Promise<void>
@@ -105,6 +146,45 @@ interface MailState {
   renameMailbox(path: string, newName: string): Promise<void>
   deleteMailbox(path: string): Promise<void>
   emptyMailbox(path: string): Promise<void>
+}
+
+// Shared by the public bulkMove action and bulkDelete's "route to Trash"
+// step (which needs to move a subset of the selection without disturbing
+// whatever's actually selected at that moment) — takes the message list
+// explicitly rather than reading selectedUids itself.
+async function performBulkMove(set: SetFn, selected: MessageSummary[], destPath: string): Promise<void> {
+  if (selected.length === 0) return
+  const groups = groupByMailbox(selected)
+  const removedKeys = new Set(selected.map(resultKey))
+
+  set((s) => {
+    const nextMessagesByKey = { ...s.messagesByKey }
+    for (const g of groups.values()) {
+      const k = key(g.accountId, g.mailboxPath)
+      nextMessagesByKey[k] = (nextMessagesByKey[k] ?? []).filter((m) => !removedKeys.has(resultKey(m)))
+    }
+    return {
+      messagesByKey: nextMessagesByKey,
+      searchResults: s.searchResults?.filter((m) => !removedKeys.has(resultKey(m))) ?? null,
+      selectedUid: selected.some((m) => m.uid === s.selectedUid) ? null : s.selectedUid,
+      selectedUids: new Set<string>()
+    }
+  })
+
+  for (const m of selected) {
+    if (!m.flags.seen) adjustUnreadCount(set, m.accountId, m.mailboxPath, -1)
+  }
+
+  try {
+    await Promise.all(
+      [...groups.values()].map((g) => window.api.messages.bulkMove(g.accountId, g.mailboxPath, g.uids, destPath))
+    )
+    for (const g of groups.values()) window.api.mail.sync(g.accountId, destPath).catch(() => void 0)
+  } catch (err) {
+    set({ statusNotice: `Couldn't move some messages: ${err instanceof Error ? err.message : String(err)}` })
+    for (const g of groups.values()) window.api.mail.sync(g.accountId, g.mailboxPath).catch(() => void 0)
+    throw err
+  }
 }
 
 export const useMailStore = create<MailState>((set, get) => ({
@@ -120,6 +200,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   searchQuery: '',
   searchResults: null,
   isSearchingServer: false,
+  selectedUids: new Set<string>(),
   isAccountDialogOpen: false,
   settings: null,
   isManualSyncing: false,
@@ -192,7 +273,13 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   async selectAccount(accountId) {
-    set({ selectedAccountId: accountId, selectedMailboxPath: null, selectedUid: null, searchResults: null })
+    set({
+      selectedAccountId: accountId,
+      selectedMailboxPath: null,
+      selectedUid: null,
+      searchResults: null,
+      selectedUids: new Set()
+    })
     await get().refreshMailboxes(accountId)
     const boxes = get().mailboxesByAccount[accountId] ?? []
     const inbox = boxes.find((b) => b.specialUse === 'Inbox') ?? boxes[0]
@@ -207,7 +294,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   async selectMailbox(mailboxPath) {
     const accountId = get().selectedAccountId
     if (!accountId) return
-    set({ selectedMailboxPath: mailboxPath, selectedUid: null, searchResults: null })
+    set({ selectedMailboxPath: mailboxPath, selectedUid: null, searchResults: null, selectedUids: new Set() })
     const cached = await window.api.messages.list(accountId, mailboxPath)
     set((s) => ({ messagesByKey: { ...s.messagesByKey, [key(accountId, mailboxPath)]: cached } }))
     window.api.mail.sync(accountId, mailboxPath).catch(() => void 0)
@@ -244,7 +331,10 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   async selectMessage(uid) {
-    set({ selectedUid: uid })
+    // A plain click/selection always means "focus just this one" — any
+    // multi-selection from a previous Ctrl/Cmd-click or Shift-click no
+    // longer applies.
+    set({ selectedUid: uid, selectedUids: new Set() })
     const current = findDisplayedMessage(get(), uid)
     if (!current) return
     const { accountId, mailboxPath } = current
@@ -379,6 +469,145 @@ export const useMailStore = create<MailState>((set, get) => ({
     }
 
     await window.api.messages.delete(accountId, mailboxPath, uid)
+  },
+
+  toggleMultiSelect(msg) {
+    const k = resultKey(msg)
+    set((s) => {
+      // Ctrl/Cmd-clicking right after a plain click (selectedUids still
+      // empty) should extend that single selection to two, not replace it —
+      // standard desktop behavior ("click A, then Ctrl-click B" selects
+      // both). Seed the set from whatever was plain-selected first.
+      let base = s.selectedUids
+      if (base.size === 0 && s.selectedUid != null) {
+        const current = findDisplayedMessage(s, s.selectedUid)
+        if (current) base = new Set([resultKey(current)])
+      }
+      const next = new Set(base)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return { selectedUids: next }
+    })
+  },
+
+  setMultiSelection(keys) {
+    set({ selectedUids: new Set(keys) })
+  },
+
+  clearMultiSelection() {
+    set({ selectedUids: new Set() })
+  },
+
+  async bulkSetFlags(flags) {
+    const selected = findDisplayedMessagesByKeys(get(), get().selectedUids)
+    if (selected.length === 0) return
+    const groups = groupByMailbox(selected)
+    const selectedKeys = new Set(selected.map(resultKey))
+
+    set((s) => {
+      const nextMessagesByKey = { ...s.messagesByKey }
+      for (const g of groups.values()) {
+        const k = key(g.accountId, g.mailboxPath)
+        const uidSet = new Set(g.uids)
+        nextMessagesByKey[k] = (nextMessagesByKey[k] ?? []).map((m) =>
+          uidSet.has(m.uid) ? { ...m, flags: { ...m.flags, ...flags } } : m
+        )
+      }
+      return {
+        messagesByKey: nextMessagesByKey,
+        searchResults:
+          s.searchResults?.map((m) => (selectedKeys.has(resultKey(m)) ? { ...m, flags: { ...m.flags, ...flags } } : m)) ??
+          null
+      }
+    })
+
+    if (typeof flags.seen === 'boolean') {
+      for (const m of selected) {
+        if (flags.seen !== m.flags.seen) adjustUnreadCount(set, m.accountId, m.mailboxPath, flags.seen ? -1 : 1)
+      }
+    }
+
+    try {
+      await Promise.all(
+        [...groups.values()].map((g) => window.api.messages.bulkSetFlags(g.accountId, g.mailboxPath, g.uids, flags))
+      )
+    } catch (err) {
+      set({ statusNotice: `Couldn't update some messages: ${err instanceof Error ? err.message : String(err)}` })
+      for (const g of groups.values()) window.api.mail.sync(g.accountId, g.mailboxPath).catch(() => void 0)
+    }
+  },
+
+  async bulkMove(destPath) {
+    const selected = findDisplayedMessagesByKeys(get(), get().selectedUids)
+    if (selected.length === 0) return
+    try {
+      await performBulkMove(set, selected, destPath)
+      set({ statusNotice: `Moved ${selected.length} message${selected.length === 1 ? '' : 's'} to ${destPath}` })
+    } catch {
+      // performBulkMove already set an error statusNotice.
+    }
+  },
+
+  // Routes each selected message to its own account's Trash, same as the
+  // single-message deleteMessage — except when a message is already
+  // sitting in Trash, which really does delete it permanently. A selection
+  // can span accounts (a multi-account search result), so messages headed
+  // to Trash are grouped by account first, since each account resolves its
+  // own Trash folder independently.
+  async bulkDelete() {
+    const selected = findDisplayedMessagesByKeys(get(), get().selectedUids)
+    if (selected.length === 0) return
+
+    const toPurge: MessageSummary[] = []
+    const toTrashByAccount = new Map<string, { trashPath: string; msgs: MessageSummary[] }>()
+    for (const m of selected) {
+      const boxes = get().mailboxesByAccount[m.accountId] ?? []
+      const overrides = get().accounts.find((a) => a.id === m.accountId)?.mailboxRoleOverrides
+      const trash = resolveMailboxRole(boxes, 'Trash', overrides?.Trash)
+      if (trash && trash.path !== m.mailboxPath) {
+        const entry = toTrashByAccount.get(m.accountId) ?? { trashPath: trash.path, msgs: [] }
+        entry.msgs.push(m)
+        toTrashByAccount.set(m.accountId, entry)
+      } else {
+        toPurge.push(m)
+      }
+    }
+
+    try {
+      for (const { trashPath, msgs } of toTrashByAccount.values()) {
+        await performBulkMove(set, msgs, trashPath)
+      }
+
+      if (toPurge.length > 0) {
+        const groups = groupByMailbox(toPurge)
+        const removedKeys = new Set(toPurge.map(resultKey))
+        set((s) => {
+          const nextMessagesByKey = { ...s.messagesByKey }
+          for (const g of groups.values()) {
+            const k = key(g.accountId, g.mailboxPath)
+            nextMessagesByKey[k] = (nextMessagesByKey[k] ?? []).filter((m) => !removedKeys.has(resultKey(m)))
+          }
+          return {
+            messagesByKey: nextMessagesByKey,
+            searchResults: s.searchResults?.filter((m) => !removedKeys.has(resultKey(m))) ?? null,
+            selectedUid: toPurge.some((m) => m.uid === s.selectedUid) ? null : s.selectedUid,
+            selectedUids: new Set<string>()
+          }
+        })
+        for (const m of toPurge) {
+          if (!m.flags.seen) adjustUnreadCount(set, m.accountId, m.mailboxPath, -1)
+        }
+        await Promise.all(
+          [...groups.values()].map((g) => window.api.messages.bulkDelete(g.accountId, g.mailboxPath, g.uids))
+        )
+      }
+
+      set({ statusNotice: `Deleted ${selected.length} message${selected.length === 1 ? '' : 's'}` })
+    } catch (err) {
+      set({ statusNotice: `Couldn't delete some messages: ${err instanceof Error ? err.message : String(err)}` })
+      const groups = groupByMailbox(selected)
+      for (const g of groups.values()) window.api.mail.sync(g.accountId, g.mailboxPath).catch(() => void 0)
+    }
   },
 
   async search(query) {

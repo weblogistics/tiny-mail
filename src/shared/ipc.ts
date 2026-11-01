@@ -18,6 +18,9 @@ export const IpcChannels = {
   MessagesDelete: 'messages:delete',
   MessagesSearch: 'messages:search',
   MessagesSearchServer: 'messages:search-server',
+  MessagesBulkSetFlags: 'messages:bulk-set-flags',
+  MessagesBulkMove: 'messages:bulk-move',
+  MessagesBulkDelete: 'messages:bulk-delete',
 
   MailSync: 'mail:sync',
   MailOpenAttachment: 'mail:open-attachment',

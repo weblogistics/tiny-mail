@@ -4,20 +4,23 @@ import type { MailboxSummary, MessageBody, MessageSummary } from '@shared/types'
 export function upsertMailbox(mb: MailboxSummary): void {
   getDb()
     .prepare(
-      `INSERT INTO mailboxes (accountId, path, name, specialUse, unreadCount, totalCount, flags, delimiter)
-       VALUES (@accountId, @path, @name, @specialUse, @unreadCount, @totalCount, @flags, @delimiter)
+      `INSERT INTO mailboxes (accountId, path, name, specialUse, specialUseFromServer, unreadCount, totalCount, flags, delimiter)
+       VALUES (@accountId, @path, @name, @specialUse, @specialUseFromServer, @unreadCount, @totalCount, @flags, @delimiter)
        ON CONFLICT(accountId, path) DO UPDATE SET
-         name = @name, specialUse = @specialUse, unreadCount = @unreadCount,
-         totalCount = @totalCount, flags = @flags, delimiter = @delimiter`
+         name = @name, specialUse = @specialUse, specialUseFromServer = @specialUseFromServer,
+         unreadCount = @unreadCount, totalCount = @totalCount, flags = @flags, delimiter = @delimiter`
     )
-    .run({ ...mb, flags: JSON.stringify(mb.flags) })
+    .run({ ...mb, specialUseFromServer: mb.specialUseFromServer ? 1 : 0, flags: JSON.stringify(mb.flags) })
 }
 
 export function listMailboxes(accountId: string): MailboxSummary[] {
   const rows = getDb()
     .prepare(`SELECT * FROM mailboxes WHERE accountId = ? ORDER BY path`)
-    .all(accountId) as (Omit<MailboxSummary, 'flags'> & { flags: string })[]
-  return rows.map((r) => ({ ...r, flags: JSON.parse(r.flags) }))
+    .all(accountId) as (Omit<MailboxSummary, 'flags' | 'specialUseFromServer'> & {
+    flags: string
+    specialUseFromServer: number
+  })[]
+  return rows.map((r) => ({ ...r, flags: JSON.parse(r.flags), specialUseFromServer: !!r.specialUseFromServer }))
 }
 
 export function removeMailbox(accountId: string, path: string): void {

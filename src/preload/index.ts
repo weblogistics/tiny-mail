@@ -30,7 +30,13 @@ const api: TinyMailApi = {
     move: (accountId, mailboxPath, uid, destPath) =>
       ipcRenderer.invoke(IpcChannels.MessagesMove, accountId, mailboxPath, uid, destPath),
     delete: (accountId, mailboxPath, uid) =>
-      ipcRenderer.invoke(IpcChannels.MessagesDelete, accountId, mailboxPath, uid)
+      ipcRenderer.invoke(IpcChannels.MessagesDelete, accountId, mailboxPath, uid),
+    bulkSetFlags: (accountId, mailboxPath, uids, flags) =>
+      ipcRenderer.invoke(IpcChannels.MessagesBulkSetFlags, accountId, mailboxPath, uids, flags),
+    bulkMove: (accountId, mailboxPath, uids, destPath) =>
+      ipcRenderer.invoke(IpcChannels.MessagesBulkMove, accountId, mailboxPath, uids, destPath),
+    bulkDelete: (accountId, mailboxPath, uids) =>
+      ipcRenderer.invoke(IpcChannels.MessagesBulkDelete, accountId, mailboxPath, uids)
   },
   mail: {
     sync: (accountId, mailboxPath) => ipcRenderer.invoke(IpcChannels.MailSync, accountId, mailboxPath),

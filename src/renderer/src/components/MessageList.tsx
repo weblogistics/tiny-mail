@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useMailStore } from '../store/useMailStore'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMailStore, resultKey } from '../store/useMailStore'
 import type { MessageSummary } from '@shared/types'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { MessageRow } from './MessageRow'
@@ -15,6 +15,7 @@ import {
 import { groupMessagesByThread } from '../utils/threadMessages'
 import { buildForwardSeed, buildReplySeed } from '../utils/quote'
 import { isOutgoingMailbox } from '../utils/isOutgoingMailbox'
+import { isTypingTarget } from '../hooks/useKeyboardShortcuts'
 import { resolveMailboxRole } from '@shared/resolveMailboxRole'
 import styles from './MessageList.module.css'
 
@@ -30,6 +31,12 @@ export function MessageList(): JSX.Element {
   const setFlags = useMailStore((s) => s.setFlags)
   const moveMessage = useMailStore((s) => s.moveMessage)
   const deleteMessage = useMailStore((s) => s.deleteMessage)
+  const selectedUids = useMailStore((s) => s.selectedUids)
+  const toggleMultiSelect = useMailStore((s) => s.toggleMultiSelect)
+  const setMultiSelection = useMailStore((s) => s.setMultiSelection)
+  const bulkSetFlags = useMailStore((s) => s.bulkSetFlags)
+  const bulkMove = useMailStore((s) => s.bulkMove)
+  const bulkDelete = useMailStore((s) => s.bulkDelete)
   const mailboxesByAccount = useMailStore((s) => s.mailboxesByAccount)
   const accounts = useMailStore((s) => s.accounts)
   const openCompose = useMailStore((s) => s.openCompose)
@@ -40,6 +47,10 @@ export function MessageList(): JSX.Element {
   const [filter, setFilter] = useState<MessageFilterKey>('all')
   const [sort, setSort] = useState<MessageSortKey>('date-desc')
   const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set())
+  // Shift-click range-select anchor — purely a UI interaction detail of
+  // this component's own click handling, not something any other
+  // component needs, so it stays local rather than living in the store.
+  const lastSelectedKeyRef = useRef<string | null>(null)
 
   const key = selectedAccountId && selectedMailboxPath ? `${selectedAccountId}::${selectedMailboxPath}` : null
   const rawMessages = searchResults ?? (key ? messagesByKey[key] ?? [] : [])
@@ -76,6 +87,64 @@ export function MessageList(): JSX.Element {
           : { kind: 'thread' as const, thread }
       )
   }, [filtered, sort, threadingActive])
+
+  // The flat order rows actually render in right now — what shift-click
+  // range-select operates over. A collapsed thread's child messages aren't
+  // individually clickable, so (matching what you can actually shift-click)
+  // they're excluded from the range entirely rather than silently included.
+  const orderedKeys = useMemo(() => {
+    const keys: string[] = []
+    for (const item of items) {
+      if (item.kind === 'message') {
+        keys.push(resultKey(item.msg))
+      } else if (expandedThreads.has(item.thread.key)) {
+        for (const msg of item.thread.messages) keys.push(resultKey(msg))
+      }
+    }
+    return keys
+  }, [items, expandedThreads])
+
+  const handleRowClick = (e: React.MouseEvent, msg: MessageSummary): void => {
+    const k = resultKey(msg)
+    if (e.shiftKey && lastSelectedKeyRef.current) {
+      const fromIdx = orderedKeys.indexOf(lastSelectedKeyRef.current)
+      const toIdx = orderedKeys.indexOf(k)
+      if (fromIdx >= 0 && toIdx >= 0) {
+        const [start, end] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
+        setMultiSelection(orderedKeys.slice(start, end + 1))
+        return
+      }
+    }
+    if (e.metaKey || e.ctrlKey) {
+      toggleMultiSelect(msg)
+      lastSelectedKeyRef.current = k
+      return
+    }
+    selectMessage(msg.uid)
+    lastSelectedKeyRef.current = k
+  }
+
+  const handleCheckboxClick = (e: React.MouseEvent, msg: MessageSummary): void => {
+    e.stopPropagation()
+    toggleMultiSelect(msg)
+    lastSelectedKeyRef.current = resultKey(msg)
+  }
+
+  // Ctrl/Cmd+A selects every message currently matching the active
+  // filter/search — not literally every message in the mailbox, which
+  // would silently select rows the user can't even see if, say, the
+  // filter is set to "Unread". Scoped to this component (rather than the
+  // app-wide keyboard hook) specifically so it can respect that filter.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !isTypingTarget(e.target)) {
+        e.preventDefault()
+        setMultiSelection(filtered.map(resultKey))
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [filtered, setMultiSelection])
 
   const toggleThread = (key: string): void => {
     setExpandedThreads((prev) => {
@@ -130,7 +199,38 @@ export function MessageList(): JSX.Element {
     }
   }
 
-  const menuItems: ContextMenuItem[] = menu
+  // Right-clicking a row that's already part of a multi-selection acts on
+  // the whole selection (standard desktop convention); right-clicking
+  // anything else acts on just that one message, same as before — even if
+  // a different multi-selection happens to exist at the time, since
+  // right-clicking outside it is a clear signal you mean just this row.
+  const menuTargetsSelection = menu ? selectedUids.size > 1 && selectedUids.has(resultKey(menu.msg)) : false
+
+  const bulkMenuItems: ContextMenuItem[] = menuTargetsSelection
+    ? [
+        { label: 'Mark as Read', onSelect: () => bulkSetFlags({ seen: true }) },
+        { label: 'Mark as Unread', onSelect: () => bulkSetFlags({ seen: false }) },
+        {
+          label: 'Move to Archive',
+          disabled: !archiveBox,
+          onSelect: () => archiveBox && bulkMove(archiveBox.path),
+          separatorBefore: true
+        },
+        {
+          label: 'Move to Junk',
+          disabled: !junkBox,
+          onSelect: () => junkBox && bulkMove(junkBox.path)
+        },
+        {
+          label: `Delete ${selectedUids.size} Messages`,
+          danger: true,
+          onSelect: () => bulkDelete(),
+          separatorBefore: true
+        }
+      ]
+    : []
+
+  const singleMenuItems: ContextMenuItem[] = menu
     ? [
         { label: 'Reply', onSelect: () => replyFromMenu(menu.msg, false) },
         { label: 'Reply All', onSelect: () => replyFromMenu(menu.msg, true) },
@@ -164,10 +264,27 @@ export function MessageList(): JSX.Element {
       ]
     : []
 
+  const menuItems = menuTargetsSelection ? bulkMenuItems : singleMenuItems
+
+  const allVisibleSelected = filtered.length > 0 && filtered.every((m) => selectedUids.has(resultKey(m)))
+  const someVisibleSelected = selectedUids.size > 0 && !allVisibleSelected
+
   return (
-    <div className={styles.list}>
+    <div className={`${styles.list} ${selectedUids.size > 0 ? styles.selecting : ''}`}>
       <div className={styles.header}>
-        {searchResults ? (
+        <span
+          className={`${styles.headerCheckbox} ${allVisibleSelected ? styles.checkboxChecked : ''} ${someVisibleSelected ? styles.checkboxIndeterminate : ''}`}
+          role="checkbox"
+          aria-checked={someVisibleSelected ? 'mixed' : allVisibleSelected}
+          title={allVisibleSelected || someVisibleSelected ? 'Deselect all' : 'Select all'}
+          onClick={() => setMultiSelection(allVisibleSelected || someVisibleSelected ? [] : filtered.map(resultKey))}
+        >
+          {allVisibleSelected && '✓'}
+          {someVisibleSelected && '–'}
+        </span>
+        {selectedUids.size > 0 ? (
+          <span className={styles.headerLabel}>{selectedUids.size} selected</span>
+        ) : searchResults ? (
           <span className={styles.headerLabel}>Results for "{searchQuery}"</span>
         ) : (
           <>
@@ -202,8 +319,10 @@ export function MessageList(): JSX.Element {
                 key={item.msg.uid}
                 msg={item.msg}
                 active={item.msg.uid === selectedUid}
+                multiSelected={selectedUids.has(resultKey(item.msg))}
                 draggable={!searchResults}
-                onClick={() => selectMessage(item.msg.uid)}
+                onClick={(e) => handleRowClick(e, item.msg)}
+                onCheckboxClick={(e) => handleCheckboxClick(e, item.msg)}
                 onContextMenu={(e) => openMenu(e, item.msg)}
               />
             )
@@ -218,9 +337,11 @@ export function MessageList(): JSX.Element {
                     key={msg.uid}
                     msg={msg}
                     active={msg.uid === selectedUid}
+                    multiSelected={selectedUids.has(resultKey(msg))}
                     draggable
                     indent
-                    onClick={() => selectMessage(msg.uid)}
+                    onClick={(e) => handleRowClick(e, msg)}
+                    onCheckboxClick={(e) => handleCheckboxClick(e, msg)}
                     onContextMenu={(e) => openMenu(e, msg)}
                   />
                 ))}

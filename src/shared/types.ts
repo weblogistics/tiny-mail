@@ -54,6 +54,13 @@ export interface MailboxSummary {
   path: string
   name: string
   specialUse: SpecialUse
+  // Whether specialUse came from the server's own IMAP SPECIAL-USE flag
+  // (authoritative) rather than Tiny Mail guessing from the mailbox's name
+  // (a fallback for servers that don't advertise SPECIAL-USE at all, and
+  // the reason more than one mailbox can end up with the same specialUse —
+  // see resolveMailboxRole, which uses this to make sure a real flag always
+  // outranks a coincidentally-named look-alike when choosing between them).
+  specialUseFromServer: boolean
   unreadCount: number
   totalCount: number
   flags: string[]

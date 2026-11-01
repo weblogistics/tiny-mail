@@ -28,6 +28,27 @@
   white-space: nowrap;
 }
 
+.headerCheckbox {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--text-tertiary);
+  border-radius: 3px;
+  background: var(--list-bg);
+  font-size: 10px;
+  line-height: 1;
+  color: #fff;
+}
+
+.headerCheckbox.checkboxChecked,
+.headerCheckbox.checkboxIndeterminate {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .headerSelect {
   border: none;
   background: none;
@@ -81,6 +102,14 @@
   background: var(--selection-bg);
 }
 
+.row.multiSelected {
+  background: var(--accent-soft);
+}
+
+.row.multiSelected.active {
+  background: var(--selection-bg);
+}
+
 /* An inset box-shadow (rather than border-left) so the stripe doesn't
    shift the row's existing padding/alignment, including for indented
    rows inside an expanded thread. */
@@ -89,21 +118,61 @@
 }
 
 .dotColumn {
-  width: 10px;
-  padding-top: 5px;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
   flex-shrink: 0;
 }
 
 .unreadDot {
+  position: absolute;
+  top: 3px;
+  left: 3px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--unread-dot);
-  display: inline-block;
 }
 
 .row.active .unreadDot {
   background: var(--selection-text);
+}
+
+/* Occupies the same spot as the unread dot and crossfades with it — shown
+   on hover, while any row in the list has a selection, or (checked) when
+   this particular row is part of one. Positioned absolutely rather than
+   given its own layout width so hovering never shifts the row's content. */
+.checkbox {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--text-tertiary);
+  border-radius: 3px;
+  background: var(--list-bg);
+  font-size: 10px;
+  line-height: 1;
+  color: #fff;
+  opacity: 0;
+}
+
+.row:hover .checkbox,
+.row.multiSelected .checkbox,
+.list.selecting .checkbox {
+  opacity: 1;
+}
+
+.row:hover .unreadDot,
+.row.multiSelected .unreadDot,
+.list.selecting .unreadDot {
+  opacity: 0;
+}
+
+.checkboxChecked {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .main {

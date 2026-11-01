@@ -42,6 +42,14 @@ export interface TinyMailApi {
     ): Promise<void>
     move(accountId: string, mailboxPath: string, uid: number, destPath: string): Promise<void>
     delete(accountId: string, mailboxPath: string, uid: number): Promise<void>
+    bulkSetFlags(
+      accountId: string,
+      mailboxPath: string,
+      uids: number[],
+      flags: Partial<MessageSummary['flags']>
+    ): Promise<void>
+    bulkMove(accountId: string, mailboxPath: string, uids: number[], destPath: string): Promise<void>
+    bulkDelete(accountId: string, mailboxPath: string, uids: number[]): Promise<void>
   }
   mail: {
     sync(accountId: string, mailboxPath: string): Promise<void>

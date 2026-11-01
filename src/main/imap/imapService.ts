@@ -212,10 +212,8 @@ export class ImapService {
     const summaries: MailboxSummary[] = []
     for (const mailbox of list) {
       const specialUseRaw = (mailbox.specialUse || '') as string
-      const specialUse =
-        SPECIAL_USE_MAP[specialUseRaw] ??
-        (mailbox.flags?.has('\\Inbox') ? 'Inbox' : null) ??
-        inferSpecialUseFromName(mailbox.name)
+      const fromServerFlag = SPECIAL_USE_MAP[specialUseRaw] ?? (mailbox.flags?.has('\\Inbox') ? 'Inbox' : null)
+      const specialUse = fromServerFlag ?? inferSpecialUseFromName(mailbox.name)
 
       let unreadCount = 0
       let totalCount = 0
@@ -232,6 +230,7 @@ export class ImapService {
         path: mailbox.path,
         name: mailbox.name,
         specialUse,
+        specialUseFromServer: fromServerFlag != null,
         unreadCount,
         totalCount,
         flags: Array.from(mailbox.flags ?? []),
@@ -638,6 +637,65 @@ export class ImapService {
     try {
       await client.messageDelete({ uid: String(uid) })
       removeMessage(accountId, mailboxPath, uid)
+    } finally {
+      lock.release()
+    }
+  }
+
+  // Bulk counterparts of setFlags/moveMessage/deleteMessage — one IMAP
+  // command covering every UID instead of one round trip per message,
+  // which matters a lot once "select all" can mean 700+ messages (a
+  // Junk/Spam cleanup being the obvious case). ImapFlow accepts an array
+  // of UIDs directly as a range and joins it into a single comma-separated
+  // set itself.
+  async setFlagsMany(
+    accountId: string,
+    mailboxPath: string,
+    uids: number[],
+    flags: Partial<MessageSummary['flags']>
+  ): Promise<void> {
+    if (uids.length === 0) return
+    const client = await this.getClient(accountId)
+    const lock = await client.getMailboxLock(mailboxPath)
+    try {
+      const add: string[] = []
+      const remove: string[] = []
+      if (flags.seen === true) add.push('\\Seen')
+      if (flags.seen === false) remove.push('\\Seen')
+      if (flags.flagged === true) add.push('\\Flagged')
+      if (flags.flagged === false) remove.push('\\Flagged')
+      if (flags.answered === true) add.push('\\Answered')
+      if (flags.draft === true) add.push('\\Draft')
+      if (flags.draft === false) remove.push('\\Draft')
+
+      if (add.length) await client.messageFlagsAdd(uids, add, { uid: true })
+      if (remove.length) await client.messageFlagsRemove(uids, remove, { uid: true })
+
+      for (const uid of uids) setMessageFlags(accountId, mailboxPath, uid, flags)
+    } finally {
+      lock.release()
+    }
+  }
+
+  async moveMessages(accountId: string, mailboxPath: string, uids: number[], destPath: string): Promise<void> {
+    if (uids.length === 0) return
+    const client = await this.getClient(accountId)
+    const lock = await client.getMailboxLock(mailboxPath)
+    try {
+      await client.messageMove(uids, destPath, { uid: true })
+      for (const uid of uids) removeMessage(accountId, mailboxPath, uid)
+    } finally {
+      lock.release()
+    }
+  }
+
+  async deleteMessages(accountId: string, mailboxPath: string, uids: number[]): Promise<void> {
+    if (uids.length === 0) return
+    const client = await this.getClient(accountId)
+    const lock = await client.getMailboxLock(mailboxPath)
+    try {
+      await client.messageDelete(uids, { uid: true })
+      for (const uid of uids) removeMessage(accountId, mailboxPath, uid)
     } finally {
       lock.release()
     }

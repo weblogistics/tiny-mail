@@ -8,6 +8,7 @@ function box(path: string, overrides: Partial<MailboxSummary> = {}): MailboxSumm
     path,
     name: path.split('/').pop() || path,
     specialUse: null,
+    specialUseFromServer: false,
     unreadCount: 0,
     totalCount: 0,
     flags: [],

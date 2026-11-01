@@ -20,6 +20,7 @@ export function getDb(): Database.Database {
       path TEXT NOT NULL,
       name TEXT NOT NULL,
       specialUse TEXT,
+      specialUseFromServer INTEGER DEFAULT 0,
       unreadCount INTEGER DEFAULT 0,
       totalCount INTEGER DEFAULT 0,
       flags TEXT DEFAULT '[]',
@@ -76,6 +77,7 @@ export function getDb(): Database.Database {
 
   ensureColumn(db, 'messages', 'ccJson', `ALTER TABLE messages ADD COLUMN ccJson TEXT DEFAULT '[]'`)
   ensureColumn(db, 'mailboxes', 'delimiter', `ALTER TABLE mailboxes ADD COLUMN delimiter TEXT DEFAULT '/'`)
+  ensureColumn(db, 'mailboxes', 'specialUseFromServer', `ALTER TABLE mailboxes ADD COLUMN specialUseFromServer INTEGER DEFAULT 0`)
   ensureColumn(db, 'message_bodies', 'replyToJson', `ALTER TABLE message_bodies ADD COLUMN replyToJson TEXT DEFAULT '[]'`)
   ensureColumn(db, 'message_bodies', 'returnPath', `ALTER TABLE message_bodies ADD COLUMN returnPath TEXT`)
   ensureColumn(db, 'message_bodies', 'rawHeaders', `ALTER TABLE message_bodies ADD COLUMN rawHeaders TEXT DEFAULT ''`)

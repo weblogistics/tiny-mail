@@ -12,10 +12,17 @@ function pathDepth(mb: MailboxSummary): number {
 // real accounts does, tag more than one mailbox the same way (a top-level
 // "Sent", a "Sent Messages", and a per-correspondent "Sent" nested three
 // levels deep have all been seen tagged Sent on the same real account).
-// Among same-role candidates, prefer whichever sits closest to the top of
-// the mailbox tree: a folder buried under another folder is far less
-// likely to be the one actually meant as the account's Sent/Trash/etc
-// folder than one sitting at or near the root.
+//
+// A real server flag always wins outright over a name-guessed match,
+// however deeply nested — it's the account's own authoritative answer,
+// not a guess. Verified against a real account where this mattered: the
+// server's actual \Sent-flagged folder was a nested per-correspondent
+// "Sent", while unrelated, unflagged top-level "Sent" and "Sent Messages"
+// folders existed purely by naming coincidence. Depth only comes into play
+// as a tie-break *within* a tier — multiple real-flagged candidates
+// (unusual, but a misconfigured server could do it) or, far more commonly,
+// multiple candidates that are all name-guesses because no real flag
+// exists anywhere for that role.
 export function resolveMailboxRole(
   boxes: MailboxSummary[],
   role: MailboxRole,
@@ -32,7 +39,10 @@ export function resolveMailboxRole(
   const candidates = boxes.filter((b) => b.specialUse === role)
   if (candidates.length <= 1) return candidates[0]
 
-  return [...candidates].sort((a, b) => {
+  const flagged = candidates.filter((b) => b.specialUseFromServer)
+  const pool = flagged.length > 0 ? flagged : candidates
+
+  return [...pool].sort((a, b) => {
     const depthDiff = pathDepth(a) - pathDepth(b)
     if (depthDiff !== 0) return depthDiff
     if (a.path.length !== b.path.length) return a.path.length - b.path.length

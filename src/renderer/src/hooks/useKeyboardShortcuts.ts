@@ -3,7 +3,7 @@ import { useMailStore } from '../store/useMailStore'
 import { buildForwardSeed, buildReplySeed } from '../utils/quote'
 import { isOutgoingMailbox } from '../utils/isOutgoingMailbox'
 
-function isTypingTarget(el: EventTarget | null): boolean {
+export function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false
   const tag = el.tagName
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable
@@ -22,6 +22,9 @@ export function useKeyboardShortcuts(): void {
       if (e.key === 'Escape') {
         if (state.isAccountDialogOpen && state.accounts.length > 0) {
           state.setAccountDialogOpen(false)
+          e.preventDefault()
+        } else if (state.selectedUids.size > 0) {
+          state.clearMultiSelection()
           e.preventDefault()
         }
         return
@@ -75,10 +78,17 @@ export function useKeyboardShortcuts(): void {
         return
       }
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedUid != null) {
-        e.preventDefault()
-        state.deleteMessage(state.selectedUid)
-        return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (state.selectedUids.size > 1) {
+          e.preventDefault()
+          state.bulkDelete()
+          return
+        }
+        if (state.selectedUid != null) {
+          e.preventDefault()
+          state.deleteMessage(state.selectedUid)
+          return
+        }
       }
 
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && list.length > 0) {

@@ -12,16 +12,27 @@ function senderLabel(msg: MessageSummary): string {
 interface MessageRowProps {
   msg: MessageSummary
   active: boolean
+  multiSelected: boolean
   draggable: boolean
   indent?: boolean
-  onClick: () => void
+  onClick: (e: React.MouseEvent) => void
+  onCheckboxClick: (e: React.MouseEvent) => void
   onContextMenu: (e: React.MouseEvent) => void
 }
 
-export function MessageRow({ msg, active, draggable, indent, onClick, onContextMenu }: MessageRowProps): JSX.Element {
+export function MessageRow({
+  msg,
+  active,
+  multiSelected,
+  draggable,
+  indent,
+  onClick,
+  onCheckboxClick,
+  onContextMenu
+}: MessageRowProps): JSX.Element {
   return (
     <button
-      className={`${styles.row} ${active ? styles.active : ''} ${!msg.flags.seen ? styles.unread : ''} ${indent ? styles.indented : ''} ${msg.flags.flagged ? styles.flaggedRow : ''}`}
+      className={`${styles.row} ${active ? styles.active : ''} ${multiSelected ? styles.multiSelected : ''} ${!msg.flags.seen ? styles.unread : ''} ${indent ? styles.indented : ''} ${msg.flags.flagged ? styles.flaggedRow : ''}`}
       onClick={onClick}
       onContextMenu={onContextMenu}
       draggable={draggable}
@@ -30,7 +41,18 @@ export function MessageRow({ msg, active, draggable, indent, onClick, onContextM
         e.dataTransfer.setData('text/tiny-mail-uid', String(msg.uid))
       }}
     >
-      <span className={styles.dotColumn}>{!msg.flags.seen && <span className={styles.unreadDot} />}</span>
+      <span className={styles.dotColumn}>
+        {!msg.flags.seen && <span className={styles.unreadDot} />}
+        <span
+          className={`${styles.checkbox} ${multiSelected ? styles.checkboxChecked : ''}`}
+          onClick={onCheckboxClick}
+          role="checkbox"
+          aria-checked={multiSelected}
+          aria-label={multiSelected ? 'Deselect message' : 'Select message'}
+        >
+          {multiSelected && '✓'}
+        </span>
+      </span>
       <span className={styles.main}>
         <span className={styles.topLine}>
           <span className={styles.sender}>{senderLabel(msg)}</span>
