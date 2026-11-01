@@ -144,6 +144,7 @@ export const useMailStore = create<MailState>((set, get) => ({
       } else if (payload.type === 'message-removed') {
         const { accountId, mailboxPath, uid } = payload.data
         const k = key(accountId, mailboxPath)
+        const removed = get().messagesByKey[k]?.find((m) => m.uid === uid)
         set((s) => ({
           messagesByKey: {
             ...s.messagesByKey,
@@ -156,6 +157,9 @@ export const useMailStore = create<MailState>((set, get) => ({
           selectedUid: s.selectedUid === uid ? null : s.selectedUid,
           statusNotice: 'That message is no longer on the server — the list has been updated.'
         }))
+        if (removed && !removed.flags.seen) {
+          adjustUnreadCount(set, accountId, mailboxPath, -1)
+        }
       } else if (payload.type === 'account-status') {
         set((s) => ({ accountStatus: { ...s.accountStatus, [payload.data.accountId]: payload.data.status } }))
       } else if (payload.type === 'settings-updated') {

@@ -275,10 +275,19 @@ export class ImapService {
       let range: string | number[]
       let total: number
       let useUid: boolean
+      // Scopes the deletion-reconciliation below: with a lookback window, a
+      // cached message can legitimately be older than this sync's own
+      // SEARCH SINCE cutoff (synced earlier under a longer-window setting,
+      // say) without actually having been deleted — only cached messages
+      // that fall *inside* the window this sync actually queried can be
+      // trusted to appear in the results if they still exist on the server.
+      // null means "All Mail": every cached message for this mailbox is in
+      // scope, since '1:*' below covers the whole thing.
+      let cutoffDate: Date | null = null
       if (sinceDays > 0) {
-        const since = new Date()
-        since.setDate(since.getDate() - sinceDays)
-        const uids = (await client.search({ since }, { uid: true })) || []
+        cutoffDate = new Date()
+        cutoffDate.setDate(cutoffDate.getDate() - sinceDays)
+        const uids = (await client.search({ since: cutoffDate }, { uid: true })) || []
         if (uids.length === 0) {
           this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: 0, total: 0, done: true } })
           return
@@ -319,12 +328,14 @@ export class ImapService {
         snippetPartId: string | null
       }
       const pending: PendingMessage[] = []
+      const seenUids = new Set<number>()
 
       for await (const msg of client.fetch(
         range,
         { envelope: true, flags: true, bodyStructure: true, uid: true },
         { uid: useUid }
       )) {
+        seenUids.add(msg.uid)
         const { hasAttachments, snippetPartId } = analyzeBodyStructure(msg.bodyStructure as never)
         const existing = existingByUid.get(msg.uid)
         const summary: MessageSummary = {
@@ -352,6 +363,22 @@ export class ImapService {
         }
         upsertMessage(summary)
         if (indexContacts) indexContactsFromMessage(summary)
+      }
+
+      // A message deleted or moved elsewhere (another device, webmail,
+      // another client entirely) never shows up again in this FETCH —
+      // nothing fails, it's just silently absent — so without comparing
+      // against what's cached, deletion from elsewhere went undetected
+      // until the moment someone happened to open that exact message (see
+      // downloadAndParse's MESSAGE_GONE_CODE handling), which is exactly
+      // the "doesn't seem to work all the time" gap. Covers push-triggered
+      // and interval syncs too, since they all funnel through this method.
+      for (const existing of existingByUid.values()) {
+        if (cutoffDate && new Date(existing.date) < cutoffDate) continue
+        if (!seenUids.has(existing.uid)) {
+          removeMessage(accountId, mailboxPath, existing.uid)
+          this.emit({ type: 'message-removed', data: { accountId, mailboxPath, uid: existing.uid } })
+        }
       }
 
       // Phase 2: the FETCH command is closed now, so it's safe to issue
