@@ -34,6 +34,7 @@ export function MessageList(): JSX.Element {
   const openCompose = useMailStore((s) => s.openCompose)
   const groupByThread = useMailStore((s) => s.settings?.groupByThread ?? false)
   const isSearchingServer = useMailStore((s) => s.isSearchingServer)
+  const setStatusNotice = useMailStore((s) => s.setStatusNotice)
   const [menu, setMenu] = useState<{ x: number; y: number; msg: MessageSummary } | null>(null)
   const [filter, setFilter] = useState<MessageFilterKey>('all')
   const [sort, setSort] = useState<MessageSortKey>('date-desc')
@@ -88,22 +89,43 @@ export function MessageList(): JSX.Element {
     setMenu({ x: e.clientX, y: e.clientY, msg })
   }
 
+  // Mirrors the same gone-message handling as selectMessage() in the store:
+  // a message removed from the server already reports itself via the
+  // 'message-removed' event and disappears from the list, so repeating
+  // that here would be redundant noise. Anything else is a genuine failure
+  // worth surfacing — this menu has no reading pane to silently leave
+  // empty, so without this the compose window would just never open.
+  const reportBodyFetchFailure = (err: unknown): void => {
+    if (!String(err).includes('TINY_MAIL_MESSAGE_GONE')) {
+      setStatusNotice(`Couldn't load that message: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   // Right-click Reply/Reply All/Forward act on whichever message was
   // clicked, independent of what's currently open in the reading pane —
   // so the quoted body is fetched directly rather than relying on
   // selectMessage() having already cached it (the message may never have
-  // been opened at all).
+  // been opened at all). Uses msg's own accountId/mailboxPath rather than
+  // the sidebar selection since this menu also fires from search results,
+  // which can span mailboxes (and in principle accounts) other than
+  // whichever is currently selected.
   const replyFromMenu = async (msg: MessageSummary, all: boolean): Promise<void> => {
-    if (!selectedAccountId) return
-    const body = await window.api.messages.getBody(selectedAccountId, msg.mailboxPath, msg.uid)
-    const isOutgoing = isOutgoingMailbox(boxes, msg.mailboxPath)
-    openCompose(all ? 'replyAll' : 'reply', buildReplySeed(msg, body, selfEmail, all, isOutgoing))
+    try {
+      const body = await window.api.messages.getBody(msg.accountId, msg.mailboxPath, msg.uid)
+      const isOutgoing = isOutgoingMailbox(boxes, msg.mailboxPath)
+      openCompose(all ? 'replyAll' : 'reply', buildReplySeed(msg, body, selfEmail, all, isOutgoing))
+    } catch (err) {
+      reportBodyFetchFailure(err)
+    }
   }
 
   const forwardFromMenu = async (msg: MessageSummary): Promise<void> => {
-    if (!selectedAccountId) return
-    const body = await window.api.messages.getBody(selectedAccountId, msg.mailboxPath, msg.uid)
-    openCompose('forward', buildForwardSeed(msg, body))
+    try {
+      const body = await window.api.messages.getBody(msg.accountId, msg.mailboxPath, msg.uid)
+      openCompose('forward', buildForwardSeed(msg, body))
+    } catch (err) {
+      reportBodyFetchFailure(err)
+    }
   }
 
   const menuItems: ContextMenuItem[] = menu
