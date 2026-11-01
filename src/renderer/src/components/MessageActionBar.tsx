@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import { buildForwardSeed, buildReplySeed } from '../utils/quote'
 import { isOutgoingMailbox } from '../utils/isOutgoingMailbox'
+import { resolveMailboxRole } from '@shared/resolveMailboxRole'
 import type { MessageBody, MessageSummary } from '@shared/types'
 import {
   IconArchive,
@@ -32,10 +33,11 @@ export function MessageActionBar({ message, body }: MessageActionBarProps): JSX.
   const openCompose = useMailStore((s) => s.openCompose)
   const [moveAnchor, setMoveAnchor] = useState<{ x: number; y: number } | null>(null)
 
-  const selfEmail = accounts.find((a) => a.id === selectedAccountId)?.email.toLowerCase()
+  const account = accounts.find((a) => a.id === selectedAccountId)
+  const selfEmail = account?.email.toLowerCase()
   const boxes = selectedAccountId ? mailboxesByAccount[selectedAccountId] ?? [] : []
-  const archiveBox = boxes.find((b) => b.specialUse === 'Archive')
-  const junkBox = boxes.find((b) => b.specialUse === 'Junk')
+  const archiveBox = resolveMailboxRole(boxes, 'Archive', account?.mailboxRoleOverrides?.Archive)
+  const junkBox = resolveMailboxRole(boxes, 'Junk', account?.mailboxRoleOverrides?.Junk)
 
   const handleReply = (all: boolean): void => {
     const isOutgoing = isOutgoingMailbox(boxes, message.mailboxPath)

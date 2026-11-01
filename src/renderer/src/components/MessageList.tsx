@@ -15,6 +15,7 @@ import {
 import { groupMessagesByThread } from '../utils/threadMessages'
 import { buildForwardSeed, buildReplySeed } from '../utils/quote'
 import { isOutgoingMailbox } from '../utils/isOutgoingMailbox'
+import { resolveMailboxRole } from '@shared/resolveMailboxRole'
 import styles from './MessageList.module.css'
 
 export function MessageList(): JSX.Element {
@@ -45,10 +46,11 @@ export function MessageList(): JSX.Element {
   const sync = key ? syncStatus[key] : undefined
   const syncing = sync && !sync.done
 
+  const account = accounts.find((a) => a.id === selectedAccountId)
   const boxes = selectedAccountId ? mailboxesByAccount[selectedAccountId] ?? [] : []
-  const archiveBox = boxes.find((b) => b.specialUse === 'Archive')
-  const junkBox = boxes.find((b) => b.specialUse === 'Junk')
-  const selfEmail = accounts.find((a) => a.id === selectedAccountId)?.email.toLowerCase()
+  const archiveBox = resolveMailboxRole(boxes, 'Archive', account?.mailboxRoleOverrides?.Archive)
+  const junkBox = resolveMailboxRole(boxes, 'Junk', account?.mailboxRoleOverrides?.Junk)
+  const selfEmail = account?.email.toLowerCase()
 
   // Threading doesn't apply to search results — those are already a
   // relevance-ish flat list spanning whatever matched, not a mailbox view.

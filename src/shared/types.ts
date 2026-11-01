@@ -5,6 +5,11 @@
 // upgrade even if the server offers one.
 export type ConnectionSecurity = 'ssl' | 'starttls' | 'none'
 
+// The special-use roles a mailbox can be assigned to beyond ordinary
+// folders. Excludes 'Inbox': IMAP guarantees exactly one INBOX per account,
+// so there's never ambiguity to resolve or override there.
+export type MailboxRole = 'Sent' | 'Drafts' | 'Trash' | 'Junk' | 'Archive'
+
 export interface AccountConfig {
   id: string
   displayName: string
@@ -18,6 +23,14 @@ export interface AccountConfig {
   username: string
   color: string
   signature: string
+  // Which physical mailbox to treat as "the" Sent/Trash/etc folder when
+  // more than one plausibly matches — common on a server that doesn't
+  // advertise IMAP SPECIAL-USE flags, where name-pattern matching alone can
+  // tag several differently-located folders the same way (a top-level
+  // "Sent" and a per-correspondent "Sent" folder are both named "Sent").
+  // A role absent from this map means "resolve it automatically" — see
+  // resolveMailboxRole.
+  mailboxRoleOverrides: Partial<Record<MailboxRole, string>>
 }
 
 // A password is only included when the user is changing it; omitting it

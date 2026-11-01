@@ -49,10 +49,14 @@ export class AccountStore {
     try {
       const raw = readFileSync(this.filePath, 'utf-8')
       const parsed = JSON.parse(raw) as (StoredAccount & LegacyStoredAccount)[]
-      // `signature` was added after the initial release; default it for
-      // accounts saved before the field existed.
-      const withSignature = parsed.map((a) => ({ ...a, signature: a.signature ?? '' }))
-      this.accounts = withSignature.map(migrateSecurity)
+      // `signature`/`mailboxRoleOverrides` were added after the initial
+      // release; default them for accounts saved before the fields existed.
+      const withDefaults = parsed.map((a) => ({
+        ...a,
+        signature: a.signature ?? '',
+        mailboxRoleOverrides: a.mailboxRoleOverrides ?? {}
+      }))
+      this.accounts = withDefaults.map(migrateSecurity)
       if (parsed.some((a) => !a.imapSecurity || !a.smtpSecurity)) this.persist()
     } catch {
       this.accounts = []

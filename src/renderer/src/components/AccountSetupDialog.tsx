@@ -17,7 +17,8 @@ const initialForm: AccountFormState = {
   smtpHost: '',
   smtpPort: 587,
   smtpSecurity: 'starttls',
-  signature: ''
+  signature: '',
+  mailboxRoleOverrides: {}
 }
 
 export function AccountSetupDialog(): JSX.Element | null {
@@ -45,7 +46,8 @@ export function AccountSetupDialog(): JSX.Element | null {
     smtpPort: Number(form.smtpPort),
     smtpSecurity: form.smtpSecurity,
     color: PALETTE[accounts.length % PALETTE.length],
-    signature: ''
+    signature: '',
+    mailboxRoleOverrides: {}
   })
 
   const handleTest = async (): Promise<void> => {

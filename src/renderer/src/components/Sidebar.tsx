@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import type { MailboxSummary } from '@shared/types'
 import { buildMailboxTree } from '../utils/mailboxTree'
+import { resolveCanonicalPaths } from '@shared/resolveMailboxRole'
 import { IconFolderPlus, IconGear } from './Icons'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { PromptDialog } from './PromptDialog'
@@ -43,6 +44,19 @@ export function Sidebar(): JSX.Element {
     setPrompt({ kind: 'new' })
   }
 
+  // Raw mb.specialUse can be true for several folders at once (three
+  // differently-located "Sent" folders, say) — only the one that's actually
+  // the resolved/canonical folder for its role should be treated as special
+  // here (undeletable, offers "Empty"), same as the sidebar icon/position.
+  const menuDisplayUse = menu
+    ? resolveCanonicalPaths(
+        mailboxesByAccount[menu.mb.accountId] ?? [],
+        accounts.find((a) => a.id === menu.mb.accountId)?.mailboxRoleOverrides
+      ).has(menu.mb.path)
+      ? menu.mb.specialUse
+      : null
+    : null
+
   const menuItems: ContextMenuItem[] = menu
     ? [
         {
@@ -51,24 +65,24 @@ export function Sidebar(): JSX.Element {
         },
         {
           label: 'Rename Mailbox…',
-          disabled: !!menu.mb.specialUse,
+          disabled: !!menuDisplayUse,
           onSelect: () => setPrompt({ kind: 'rename', mb: menu.mb }),
           separatorBefore: true
         },
         {
           label: 'Delete Mailbox',
           danger: true,
-          disabled: !!menu.mb.specialUse,
+          disabled: !!menuDisplayUse,
           onSelect: () => {
             if (window.confirm(`Delete "${menu.mb.name}" and everything in it? This can't be undone.`)) {
               deleteMailbox(menu.mb.path)
             }
           }
         },
-        ...(menu.mb.specialUse === 'Trash' || menu.mb.specialUse === 'Junk'
+        ...(menuDisplayUse === 'Trash' || menuDisplayUse === 'Junk'
           ? [
               {
-                label: `Empty ${menu.mb.specialUse === 'Trash' ? 'Trash' : 'Junk'}`,
+                label: `Empty ${menuDisplayUse === 'Trash' ? 'Trash' : 'Junk'}`,
                 danger: true,
                 separatorBefore: true,
                 onSelect: () => {
@@ -86,7 +100,9 @@ export function Sidebar(): JSX.Element {
     <div className={styles.sidebar}>
       <div className={styles.scroll}>
         {accounts.map((account) => {
-          const tree = buildMailboxTree(mailboxesByAccount[account.id] ?? [])
+          const boxes = mailboxesByAccount[account.id] ?? []
+          const canonicalPaths = resolveCanonicalPaths(boxes, account.mailboxRoleOverrides)
+          const tree = buildMailboxTree(boxes, canonicalPaths)
           const status = accountStatus[account.id] ?? 'offline'
           return (
             <div key={account.id} className={styles.accountSection}>

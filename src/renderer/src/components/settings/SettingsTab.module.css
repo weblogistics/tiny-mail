@@ -161,6 +161,51 @@
   resize: vertical;
 }
 
+.rolesField {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.rolesField > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.rolesHint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.roleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.roleLabel {
+  width: 56px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.roleSelect {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--list-bg);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
 .editFooter {
   display: flex;
   justify-content: space-between;

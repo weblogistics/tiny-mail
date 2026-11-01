@@ -14,6 +14,7 @@ import type {
 } from '@shared/types'
 import type { AccountStore } from '../accounts/accountStore'
 import { resolveImapTls, type ImapService } from '../imap/imapService'
+import { resolveMailboxRole } from '@shared/resolveMailboxRole'
 import type { SettingsStore } from '../settings/settingsStore'
 import { verifySmtpConfig, type SmtpService } from '../smtp/smtpService'
 import { searchMessages } from '../db/messageCache'
@@ -215,7 +216,8 @@ export function registerIpcHandlers(
     // so (like every real mail client) we append one to Sent ourselves.
     try {
       const mailboxes = imapService.getCachedMailboxes(draft.accountId)
-      const sentBox = mailboxes.find((m) => m.specialUse === 'Sent')?.path ?? 'Sent'
+      const overrides = accountStore.get(draft.accountId)?.mailboxRoleOverrides
+      const sentBox = resolveMailboxRole(mailboxes, 'Sent', overrides?.Sent)?.path ?? 'Sent'
       const raw = await smtpService.buildMime(draft)
       await imapService.appendMessage(draft.accountId, sentBox, raw, ['\\Seen'])
     } catch (err) {
@@ -227,7 +229,8 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IpcChannels.ComposeSaveDraft, async (_e, draft: ComposeDraft) => {
     const mailboxes = imapService.getCachedMailboxes(draft.accountId)
-    const draftsBox = mailboxes.find((m) => m.specialUse === 'Drafts')?.path ?? 'Drafts'
+    const overrides = accountStore.get(draft.accountId)?.mailboxRoleOverrides
+    const draftsBox = resolveMailboxRole(mailboxes, 'Drafts', overrides?.Drafts)?.path ?? 'Drafts'
     const raw = await smtpService.buildMime(draft)
     await imapService.appendMessage(draft.accountId, draftsBox, raw, ['\\Draft'])
   })

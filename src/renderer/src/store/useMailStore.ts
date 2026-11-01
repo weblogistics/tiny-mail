@@ -9,6 +9,7 @@ import type {
   MessageSummary,
   SyncProgress
 } from '@shared/types'
+import { resolveMailboxRole } from '@shared/resolveMailboxRole'
 
 function key(accountId: string, mailboxPath: string): string {
   return `${accountId}::${mailboxPath}`
@@ -359,7 +360,8 @@ export const useMailStore = create<MailState>((set, get) => ({
     if (!removed) return
     const { accountId, mailboxPath } = removed
     const boxes = get().mailboxesByAccount[accountId] ?? []
-    const trash = boxes.find((b) => b.specialUse === 'Trash')
+    const overrides = get().accounts.find((a) => a.id === accountId)?.mailboxRoleOverrides
+    const trash = resolveMailboxRole(boxes, 'Trash', overrides?.Trash)
     if (trash && trash.path !== mailboxPath) {
       await get().moveMessage(uid, trash.path)
       return

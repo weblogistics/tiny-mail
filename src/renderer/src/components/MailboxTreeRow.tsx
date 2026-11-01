@@ -1,4 +1,4 @@
-import type { MailboxSummary } from '@shared/types'
+import type { MailboxSummary, SpecialUse } from '@shared/types'
 import type { MailboxTreeNode } from '../utils/mailboxTree'
 import {
   IconArchive,
@@ -13,8 +13,8 @@ import {
 } from './Icons'
 import styles from './Sidebar.module.css'
 
-function mailboxIcon(mb: MailboxSummary): JSX.Element {
-  switch (mb.specialUse) {
+function mailboxIcon(displayUse: SpecialUse): JSX.Element {
+  switch (displayUse) {
     case 'Inbox':
       return <IconInbox width={15} height={15} />
     case 'Sent':
@@ -32,8 +32,8 @@ function mailboxIcon(mb: MailboxSummary): JSX.Element {
   }
 }
 
-function displayName(mb: MailboxSummary): string {
-  if (mb.specialUse === 'Inbox') return 'Inbox'
+function displayName(mb: MailboxSummary, displayUse: SpecialUse): string {
+  if (displayUse === 'Inbox') return 'Inbox'
   return mb.name
 }
 
@@ -90,8 +90,8 @@ export function MailboxTreeRow({
         >
           {hasChildren && (isCollapsed ? <IconChevronRight width={11} height={11} /> : <IconChevronDown width={11} height={11} />)}
         </span>
-        <span className={styles.mailboxIcon}>{mailboxIcon(mb)}</span>
-        <span className={styles.mailboxName}>{displayName(mb)}</span>
+        <span className={styles.mailboxIcon}>{mailboxIcon(node.displayUse)}</span>
+        <span className={styles.mailboxName}>{displayName(mb, node.displayUse)}</span>
         {mb.unreadCount > 0 && (
           <span className={`${styles.badge} ${active ? styles.badgeActive : ''}`}>{mb.unreadCount}</span>
         )}

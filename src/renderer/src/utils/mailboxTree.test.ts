@@ -59,4 +59,33 @@ describe('buildMailboxTree', () => {
     const tree = buildMailboxTree([box('Archive'), box('Archive/Zebra'), box('Archive/Apple')])
     expect(tree[0].children.map((n) => n.mb.path)).toEqual(['Archive/Apple', 'Archive/Zebra'])
   })
+
+  it('defaults displayUse to each mailbox\'s own specialUse when canonicalPaths is omitted', () => {
+    const tree = buildMailboxTree([box('Sent', { specialUse: 'Sent' })])
+    expect(tree[0].displayUse).toBe('Sent')
+  })
+
+  it('only treats the canonical mailbox as special when multiple share a specialUse', () => {
+    // Two folders that both look like "Sent" — only the one in canonicalPaths
+    // should display (and sort) as special; the other is just a folder.
+    const tree = buildMailboxTree(
+      [
+        box('Sent', { specialUse: 'Sent' }),
+        box('Accountant/Sent', { specialUse: 'Sent', name: 'Sent' })
+      ],
+      new Set(['Sent'])
+    )
+    const winner = tree.find((n) => n.mb.path === 'Sent')
+    const loser = tree.find((n) => n.mb.path === 'Accountant/Sent')
+    expect(winner?.displayUse).toBe('Sent')
+    expect(loser?.displayUse).toBeNull()
+  })
+
+  it('sorts a non-canonical special-looking folder alphabetically, not into its special-use slot', () => {
+    const tree = buildMailboxTree(
+      [box('Zebra'), box('Apple'), box('NotTheRealSent', { specialUse: 'Sent' })],
+      new Set() // nothing is canonical
+    )
+    expect(tree.map((n) => n.mb.path)).toEqual(['Apple', 'NotTheRealSent', 'Zebra'])
+  })
 })

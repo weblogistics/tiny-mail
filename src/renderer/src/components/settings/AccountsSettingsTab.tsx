@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react'
-import type { AccountConfig } from '@shared/types'
+import type { AccountConfig, MailboxSummary } from '@shared/types'
+import { MAILBOX_ROLES, resolveMailboxRole } from '@shared/resolveMailboxRole'
 import { AccountFormFields, type AccountFormState } from '../AccountFormFields'
 import { IconPencil, IconTrash } from '../Icons'
 import styles from './SettingsTab.module.css'
 
 const PALETTE = ['#0a84ff', '#ff9f0a', '#28c840', '#ff3b30', '#af52de', '#64d2ff']
+
+const ROLE_LABELS: Record<(typeof MAILBOX_ROLES)[number], string> = {
+  Sent: 'Sent',
+  Drafts: 'Drafts',
+  Trash: 'Trash',
+  Junk: 'Junk',
+  Archive: 'Archive'
+}
 
 const blankForm: AccountFormState = {
   displayName: '',
@@ -17,7 +26,8 @@ const blankForm: AccountFormState = {
   smtpHost: '',
   smtpPort: 587,
   smtpSecurity: 'starttls',
-  signature: ''
+  signature: '',
+  mailboxRoleOverrides: {}
 }
 
 function toForm(account: AccountConfig): AccountFormState {
@@ -31,12 +41,24 @@ export function AccountsSettingsTab(): JSX.Element {
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Only known for an existing, already-connected account — a brand new
+  // one has no mailboxes to assign roles to yet, so the roles section only
+  // shows up once there's something to pick from.
+  const [mailboxes, setMailboxes] = useState<MailboxSummary[]>([])
 
   const load = async (): Promise<void> => setAccounts(await window.api.accounts.list())
 
   useEffect(() => {
     load()
   }, [])
+
+  useEffect(() => {
+    if (typeof editingId === 'string' && editingId !== 'new') {
+      window.api.mailboxes.list(editingId).then(setMailboxes)
+    } else {
+      setMailboxes([])
+    }
+  }, [editingId])
 
   const patch = (p: Partial<AccountFormState>): void => setForm((f) => ({ ...f, ...p }))
 
@@ -68,8 +90,20 @@ export function AccountsSettingsTab(): JSX.Element {
     smtpPort: Number(form.smtpPort),
     smtpSecurity: form.smtpSecurity,
     color: existingColor ?? PALETTE[accounts.length % PALETTE.length],
-    signature: form.signature
+    signature: form.signature,
+    mailboxRoleOverrides: form.mailboxRoleOverrides
   })
+
+  const setRoleOverride = (role: (typeof MAILBOX_ROLES)[number], path: string): void => {
+    patch({
+      mailboxRoleOverrides: {
+        ...form.mailboxRoleOverrides,
+        // Empty string is the "Auto" option — clear the override entirely
+        // rather than storing it as an override pointing at nothing.
+        [role]: path || undefined
+      }
+    })
+  }
 
   const handleTest = async (): Promise<void> => {
     if (!form.password) return
@@ -165,6 +199,36 @@ export function AccountsSettingsTab(): JSX.Element {
               placeholder="Appended to new messages sent from this account"
             />
           </div>
+
+          {editingId !== 'new' && mailboxes.length > 0 && (
+            <div className={styles.rolesField}>
+              <label>Mailbox Roles</label>
+              <p className={styles.rolesHint}>
+                Which folder Tiny Mail uses for each role. Only matters when there's more than one
+                plausible match — most accounts never need to touch this.
+              </p>
+              {MAILBOX_ROLES.map((role) => {
+                const autoResolved = resolveMailboxRole(mailboxes, role)
+                return (
+                  <div key={role} className={styles.roleRow}>
+                    <span className={styles.roleLabel}>{ROLE_LABELS[role]}</span>
+                    <select
+                      className={styles.roleSelect}
+                      value={form.mailboxRoleOverrides[role] ?? ''}
+                      onChange={(e) => setRoleOverride(role, e.target.value)}
+                    >
+                      <option value="">Auto{autoResolved ? ` (${autoResolved.path})` : ''}</option>
+                      {mailboxes.map((mb) => (
+                        <option key={mb.path} value={mb.path}>
+                          {mb.path}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {testResult && (
             <div className={testResult.ok ? styles.testOk : styles.testError} style={{ marginTop: 10 }}>
