@@ -24,7 +24,10 @@ const body: MessageBody = {
   uid: 1,
   html: '<p>Here are the numbers</p>',
   text: 'Here are the numbers',
-  attachments: []
+  attachments: [],
+  replyTo: [],
+  returnPath: null,
+  rawHeaders: ''
 }
 
 describe('buildReplySeed', () => {

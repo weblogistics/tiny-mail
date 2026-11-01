@@ -91,6 +91,18 @@ export interface MessageBody {
   html: string | null
   text: string | null
   attachments: MessageAttachment[]
+  // Separate from `from` on MessageSummary because they're different trust
+  // signals: From is whatever the message claims (trivially spoofable),
+  // Reply-To is where a reply actually goes (a classic phishing mismatch —
+  // display name says your bank, Reply-To is an attacker's inbox), and
+  // Return-Path is the SMTP envelope sender the receiving server actually
+  // recorded, which is harder to fake than either header.
+  replyTo: MessageAddress[]
+  returnPath: string | null
+  // The raw header block exactly as received (folding and casing intact),
+  // for "View Headers" — Authentication-Results (SPF/DKIM/DMARC) and the
+  // Received chain only exist here, not in any parsed field above.
+  rawHeaders: string
 }
 
 export interface ComposeDraft {

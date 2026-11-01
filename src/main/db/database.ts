@@ -56,6 +56,9 @@ export function getDb(): Database.Database {
       html TEXT,
       text TEXT,
       attachmentsJson TEXT DEFAULT '[]',
+      replyToJson TEXT DEFAULT '[]',
+      returnPath TEXT,
+      rawHeaders TEXT DEFAULT '',
       PRIMARY KEY (accountId, mailboxPath, uid)
     );
 
@@ -73,6 +76,9 @@ export function getDb(): Database.Database {
 
   ensureColumn(db, 'messages', 'ccJson', `ALTER TABLE messages ADD COLUMN ccJson TEXT DEFAULT '[]'`)
   ensureColumn(db, 'mailboxes', 'delimiter', `ALTER TABLE mailboxes ADD COLUMN delimiter TEXT DEFAULT '/'`)
+  ensureColumn(db, 'message_bodies', 'replyToJson', `ALTER TABLE message_bodies ADD COLUMN replyToJson TEXT DEFAULT '[]'`)
+  ensureColumn(db, 'message_bodies', 'returnPath', `ALTER TABLE message_bodies ADD COLUMN returnPath TEXT`)
+  ensureColumn(db, 'message_bodies', 'rawHeaders', `ALTER TABLE message_bodies ADD COLUMN rawHeaders TEXT DEFAULT ''`)
 
   return db
 }

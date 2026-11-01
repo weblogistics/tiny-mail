@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import type { MessageAddress, MessageAttachment } from '@shared/types'
 import { sanitizeMessageHtml } from '../utils/sanitizeHtml'
-import { IconMoon, IconPaperclip, IconSun } from './Icons'
+import { IconAlertTriangle, IconMoon, IconPaperclip, IconSun } from './Icons'
 import { MessageActionBar } from './MessageActionBar'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
+import { MessageHeadersDialog } from './MessageHeadersDialog'
 import { useSystemColorScheme } from '../hooks/useSystemColorScheme'
 import styles from './ReadingPane.module.css'
 
@@ -37,6 +38,15 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// A Reply-To that merely repeats the From address (the common, benign case)
+// shouldn't earn a warning row — only one that actually redirects replies
+// somewhere else is the phishing-relevant signal worth flagging.
+function replyToDiffersFromSender(from: MessageAddress[], replyTo: MessageAddress[]): boolean {
+  if (!replyTo.length) return false
+  const fromAddresses = new Set(from.map((a) => a.address.toLowerCase()).filter(Boolean))
+  return replyTo.some((a) => a.address && !fromAddresses.has(a.address.toLowerCase()))
+}
+
 export function ReadingPane(): JSX.Element {
   const selectedAccountId = useMailStore((s) => s.selectedAccountId)
   const selectedMailboxPath = useMailStore((s) => s.selectedMailboxPath)
@@ -49,6 +59,8 @@ export function ReadingPane(): JSX.Element {
   const [emailDark, setEmailDark] = useState(false)
   const [openingPartId, setOpeningPartId] = useState<string | null>(null)
   const [attachMenu, setAttachMenu] = useState<{ x: number; y: number; attachment: MessageAttachment } | null>(null)
+  const [hoveredLink, setHoveredLink] = useState<string | null>(null)
+  const [headersOpen, setHeadersOpen] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const systemScheme = useSystemColorScheme()
 
@@ -77,6 +89,15 @@ export function ReadingPane(): JSX.Element {
   useEffect(() => {
     setEmailDark(systemScheme === 'dark')
   }, [bodyKey, systemScheme])
+
+  // Otherwise a link preview from the previous message could still be
+  // showing (stale) for the first instant after switching, since the new
+  // iframe's own 'load' event — which is what normally clears it — hasn't
+  // fired yet.
+  useEffect(() => {
+    setHoveredLink(null)
+    setHeadersOpen(false)
+  }, [bodyKey])
 
   const sanitized = useMemo(() => {
     if (!body?.html) return null
@@ -116,6 +137,26 @@ export function ReadingPane(): JSX.Element {
         { label: 'Save As…', onSelect: () => handleSaveAttachment(attachMenu.attachment) }
       ]
     : []
+
+  // The iframe is sandboxed without allow-scripts, so the message itself
+  // can never run code — but allow-same-origin still lets *our own*
+  // parent-side code read and listen on its DOM, which is how this works
+  // without granting the email any script execution of its own. Wired via
+  // the iframe's 'load' event (fired fresh on every message, since srcDoc
+  // changing reloads it) rather than a ref effect, so it's never attached
+  // to a stale/already-replaced document.
+  const handleIframeLoad = (): void => {
+    const doc = iframeRef.current?.contentDocument
+    if (!doc?.body) return
+    doc.body.addEventListener('mouseover', (e) => {
+      const link = (e.target as HTMLElement).closest?.('a[href]') as HTMLAnchorElement | null
+      setHoveredLink(link ? link.href : null)
+    })
+    doc.body.addEventListener('mouseout', (e) => {
+      const stillOnLink = (e.relatedTarget as HTMLElement | null)?.closest?.('a[href]')
+      if (!stillOnLink) setHoveredLink(null)
+    })
+  }
 
   const srcDoc = sanitized
     ? `<!doctype html><html><head><base target="_blank"><meta charset="utf-8"><meta name="color-scheme" content="light"><style>
@@ -162,11 +203,33 @@ export function ReadingPane(): JSX.Element {
           <div className={styles.avatar}>{initial(message.from)}</div>
           <div className={styles.metaText}>
             <div className={styles.fromLine}>
-              <span className={styles.fromName}>{message.from[0]?.name || message.from[0]?.address}</span>
+              {message.from[0]?.name ? (
+                <>
+                  <span className={styles.fromName}>{message.from[0].name}</span>
+                  {message.from[0].address && (
+                    <span className={styles.fromAddress}>{message.from[0].address}</span>
+                  )}
+                </>
+              ) : (
+                <span className={styles.fromName}>{message.from[0]?.address || 'Unknown sender'}</span>
+              )}
             </div>
             <div className={styles.toLine}>To: {addressList(message.to)}</div>
+            {body && replyToDiffersFromSender(message.from, body.replyTo) && (
+              <div className={styles.replyToWarning} title="Replying to this message will go to a different address than it was sent from">
+                <IconAlertTriangle width={12} height={12} />
+                Replies go to: {addressList(body.replyTo)}
+              </div>
+            )}
           </div>
-          <div className={styles.dateText}>{new Date(message.date).toLocaleString()}</div>
+          <div className={styles.metaRight}>
+            <div className={styles.dateText}>{new Date(message.date).toLocaleString()}</div>
+            {body && (
+              <button className={styles.headersLink} onClick={() => setHeadersOpen(true)}>
+                View Headers
+              </button>
+            )}
+          </div>
         </div>
         {body && body.attachments.length > 0 && (
           <div className={styles.attachments}>
@@ -200,13 +263,31 @@ export function ReadingPane(): JSX.Element {
       </div>
       <div className={styles.bodyWrap}>
         {srcDoc ? (
-          <iframe ref={iframeRef} className={styles.bodyFrame} sandbox="allow-same-origin allow-popups" srcDoc={srcDoc} />
+          <iframe
+            ref={iframeRef}
+            className={styles.bodyFrame}
+            sandbox="allow-same-origin allow-popups"
+            srcDoc={srcDoc}
+            onLoad={handleIframeLoad}
+          />
         ) : (
           <pre className={styles.plainBody}>{body?.text || ''}</pre>
+        )}
+        {hoveredLink && (
+          <div className={styles.linkPreview} title={hoveredLink}>
+            {hoveredLink}
+          </div>
         )}
       </div>
       {attachMenu && (
         <ContextMenu x={attachMenu.x} y={attachMenu.y} items={attachMenuItems} onClose={() => setAttachMenu(null)} />
+      )}
+      {headersOpen && body && (
+        <MessageHeadersDialog
+          subject={message.subject}
+          rawHeaders={body.rawHeaders}
+          onClose={() => setHeadersOpen(false)}
+        />
       )}
     </div>
   )

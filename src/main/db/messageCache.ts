@@ -163,10 +163,11 @@ export function removeMessage(accountId: string, mailboxPath: string, uid: numbe
 export function saveMessageBody(body: MessageBody): void {
   getDb()
     .prepare(
-      `INSERT INTO message_bodies (accountId, mailboxPath, uid, html, text, attachmentsJson)
-       VALUES (@accountId, @mailboxPath, @uid, @html, @text, @attachmentsJson)
+      `INSERT INTO message_bodies (accountId, mailboxPath, uid, html, text, attachmentsJson, replyToJson, returnPath, rawHeaders)
+       VALUES (@accountId, @mailboxPath, @uid, @html, @text, @attachmentsJson, @replyToJson, @returnPath, @rawHeaders)
        ON CONFLICT(accountId, mailboxPath, uid) DO UPDATE SET
-         html=@html, text=@text, attachmentsJson=@attachmentsJson`
+         html=@html, text=@text, attachmentsJson=@attachmentsJson,
+         replyToJson=@replyToJson, returnPath=@returnPath, rawHeaders=@rawHeaders`
     )
     .run({
       accountId: body.accountId,
@@ -174,7 +175,10 @@ export function saveMessageBody(body: MessageBody): void {
       uid: body.uid,
       html: body.html,
       text: body.text,
-      attachmentsJson: JSON.stringify(body.attachments)
+      attachmentsJson: JSON.stringify(body.attachments),
+      replyToJson: JSON.stringify(body.replyTo),
+      returnPath: body.returnPath,
+      rawHeaders: body.rawHeaders
     })
 }
 
@@ -186,8 +190,30 @@ export function getMessageBody(
   const row = getDb()
     .prepare(`SELECT * FROM message_bodies WHERE accountId = ? AND mailboxPath = ? AND uid = ?`)
     .get(accountId, mailboxPath, uid) as
-    | { accountId: string; mailboxPath: string; uid: number; html: string | null; text: string | null; attachmentsJson: string }
+    | {
+        accountId: string
+        mailboxPath: string
+        uid: number
+        html: string | null
+        text: string | null
+        attachmentsJson: string
+        replyToJson: string | null
+        returnPath: string | null
+        rawHeaders: string | null
+      }
     | undefined
   if (!row) return undefined
-  return { ...row, attachments: JSON.parse(row.attachmentsJson) }
+  return {
+    accountId: row.accountId,
+    mailboxPath: row.mailboxPath,
+    uid: row.uid,
+    html: row.html,
+    text: row.text,
+    attachments: JSON.parse(row.attachmentsJson),
+    // Cached rows written before this column existed have NULL here — treat
+    // the same as "none captured" rather than crashing JSON.parse(null).
+    replyTo: row.replyToJson ? JSON.parse(row.replyToJson) : [],
+    returnPath: row.returnPath,
+    rawHeaders: row.rawHeaders ?? ''
+  }
 }

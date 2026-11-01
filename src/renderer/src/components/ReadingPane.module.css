@@ -76,9 +76,54 @@
   min-width: 0;
 }
 
+.fromLine {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .fromName {
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.fromAddress {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.replyToWarning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  color: #b8860b;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+  .replyToWarning {
+    color: #e0b94d;
+  }
+}
+
+.metaRight {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.headersLink {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.headersLink:hover {
+  text-decoration: underline;
 }
 
 .toLine {
@@ -152,6 +197,27 @@
 .bodyWrap {
   flex: 1;
   overflow: hidden;
+  position: relative;
+}
+
+.linkPreview {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  max-width: 70%;
+  padding: 4px 10px;
+  border-top-right-radius: var(--radius-sm);
+  background: var(--toolbar-bg);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-bottom: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .bodyFrame {

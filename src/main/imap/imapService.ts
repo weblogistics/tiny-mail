@@ -74,6 +74,19 @@ function toAddresses(list?: { name?: string; address?: string }[]): MessageAddre
   return list.map((a) => ({ name: a.name || '', address: a.address || '' }))
 }
 
+// mailparser parses Return-Path the same way as From/Reply-To, but — unlike
+// those — never collapses a repeated header down to a single value, since a
+// forwarded/relayed message can legitimately carry more than one. The first
+// occurrence is the one the receiving server itself stamped on accepting
+// the message, which is what makes it a meaningfully different signal from
+// From (attacker-controlled) or Reply-To (also attacker-controlled).
+function extractReturnPath(headers: Map<string, unknown>): string | null {
+  const raw = headers.get('return-path')
+  const entries = Array.isArray(raw) ? raw : raw ? [raw] : []
+  const first = entries[0] as { value?: { address?: string }[] } | undefined
+  return first?.value?.[0]?.address || null
+}
+
 // Many self-hosted/smaller IMAP servers don't advertise RFC 6154 SPECIAL-USE
 // flags, so fall back to recognizing common folder names.
 const NAME_FALLBACK_PATTERNS: [RegExp, SpecialUse][] = [
@@ -512,7 +525,13 @@ export class ImapService {
 
   async getMessageBody(accountId: string, mailboxPath: string, uid: number): Promise<MessageBody> {
     const cached = getMessageBody(accountId, mailboxPath, uid)
-    if (cached) return cached
+    // A row cached before rawHeaders/replyTo/returnPath existed has an
+    // empty rawHeaders — every real message has headers, so that's an
+    // unambiguous "written by an older version" signal rather than a
+    // genuine empty value. Re-fetching once backfills it instead of
+    // permanently leaving View Headers and the Reply-To warning blank for
+    // anything synced before this feature shipped.
+    if (cached && cached.rawHeaders) return cached
 
     const parsed = await this.downloadAndParse(accountId, mailboxPath, uid)
 
@@ -533,7 +552,15 @@ export class ImapService {
       uid,
       html: rawHtml ? resolveInlineImages(rawHtml, parsed.attachments || []) : null,
       text: parsed.text || null,
-      attachments
+      attachments,
+      replyTo: toAddresses(parsed.replyTo?.value),
+      returnPath: extractReturnPath(parsed.headers),
+      // headerLines preserves the message exactly as received (original
+      // folding, casing, header order, duplicates) — the parsed fields
+      // above only cover headers this app already knows how to interpret,
+      // but a forged message is caught by things like Authentication-Results
+      // or an unexpected Received chain, which only exist here.
+      rawHeaders: parsed.headerLines.map((h) => h.line).join('\n')
     }
     saveMessageBody(body)
     return body

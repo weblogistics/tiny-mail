@@ -242,6 +242,21 @@ export const IconMoveToFolder = (p: IconProps) => (
   </svg>
 )
 
+export const IconAlertTriangle = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 3.5 2.5 20h19z" />
+    <path d="M12 9.5v5" />
+    <circle cx="12" cy="17" r="0.75" fill="currentColor" stroke="none" />
+  </svg>
+)
+
+export const IconCopy = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="8.5" y="8.5" width="11" height="11" rx="1.5" />
+    <path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8a1.5 1.5 0 0 0 1.5 1.5h2.5" />
+  </svg>
+)
+
 export const IconPencil = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M4 20h4L18 10l-4-4L4 16v4z" />
