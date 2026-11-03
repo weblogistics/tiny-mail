@@ -63,6 +63,7 @@ export function ReadingPane(): JSX.Element {
   const [attachMenu, setAttachMenu] = useState<{ x: number; y: number; attachment: MessageAttachment } | null>(null)
   const [hoveredLink, setHoveredLink] = useState<string | null>(null)
   const [headersOpen, setHeadersOpen] = useState(false)
+  const [linkMenu, setLinkMenu] = useState<{ x: number; y: number; href: string } | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const systemScheme = useSystemColorScheme()
 
@@ -99,6 +100,7 @@ export function ReadingPane(): JSX.Element {
   useEffect(() => {
     setHoveredLink(null)
     setHeadersOpen(false)
+    setLinkMenu(null)
   }, [bodyKey])
 
   const sanitized = useMemo(() => {
@@ -166,7 +168,33 @@ export function ReadingPane(): JSX.Element {
       const stillOnLink = (e.relatedTarget as HTMLElement | null)?.closest?.('a[href]')
       if (!stillOnLink) setHoveredLink(null)
     })
+    doc.body.addEventListener('contextmenu', (e) => {
+      const link = (e.target as HTMLElement).closest?.('a[href]') as HTMLAnchorElement | null
+      if (!link) return
+      e.preventDefault()
+      // The event's coordinates are relative to the iframe's own document,
+      // not the parent window — our ContextMenu renders in the parent, so
+      // they need the iframe's own on-screen offset added in.
+      const frameRect = iframeRef.current?.getBoundingClientRect()
+      setLinkMenu({
+        x: e.clientX + (frameRect?.left ?? 0),
+        y: e.clientY + (frameRect?.top ?? 0),
+        href: link.href
+      })
+    })
   }
+
+  const linkMenuItems: ContextMenuItem[] = linkMenu
+    ? [
+        { label: 'Open Link', onSelect: () => window.open(linkMenu.href, '_blank') },
+        {
+          label: 'Copy Link',
+          onSelect: () => {
+            navigator.clipboard.writeText(linkMenu.href).catch(() => void 0)
+          }
+        }
+      ]
+    : []
 
   const srcDoc = sanitized
     ? `<!doctype html><html><head><base target="_blank"><meta charset="utf-8"><meta name="color-scheme" content="light"><style>
@@ -291,6 +319,9 @@ export function ReadingPane(): JSX.Element {
       </div>
       {attachMenu && (
         <ContextMenu x={attachMenu.x} y={attachMenu.y} items={attachMenuItems} onClose={() => setAttachMenu(null)} />
+      )}
+      {linkMenu && (
+        <ContextMenu x={linkMenu.x} y={linkMenu.y} items={linkMenuItems} onClose={() => setLinkMenu(null)} />
       )}
       {headersOpen && body && (
         <MessageHeadersDialog
