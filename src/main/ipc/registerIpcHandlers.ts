@@ -10,7 +10,8 @@ import type {
   ComposeDraft,
   ComposeSeed,
   MailEventPayload,
-  MessageSummary
+  MessageSummary,
+  SearchOptions
 } from '@shared/types'
 import type { AccountStore } from '../accounts/accountStore'
 import { resolveImapTls, type ImapService } from '../imap/imapService'
@@ -126,14 +127,17 @@ export function registerIpcHandlers(
     return imapService.getCachedMessages(accountId, mailboxPath)
   })
 
-  ipcMain.handle(IpcChannels.MessagesSearch, (_e, accountId: string, query: string): MessageSummary[] => {
-    return searchMessages(accountId, query)
-  })
+  ipcMain.handle(
+    IpcChannels.MessagesSearch,
+    (_e, accountId: string, query: string, options: SearchOptions): MessageSummary[] => {
+      return searchMessages(accountId, query, options)
+    }
+  )
 
   ipcMain.handle(
     IpcChannels.MessagesSearchServer,
-    async (_e, accountId: string, query: string): Promise<MessageSummary[]> => {
-      return imapService.searchServer(accountId, query)
+    async (_e, accountId: string, query: string, options: SearchOptions): Promise<MessageSummary[]> => {
+      return imapService.searchServer(accountId, query, options)
     }
   )
 

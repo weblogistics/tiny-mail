@@ -25,6 +25,7 @@ import type {
   MessageAttachment,
   MessageBody,
   MessageSummary,
+  SearchOptions,
   SpecialUse
 } from '@shared/types'
 
@@ -427,28 +428,48 @@ export class ImapService {
   // Local search (messageCache.searchMessages) only covers whatever's
   // already synced — which is limited to the configured lookback window — so
   // older mail that still exists on the server wouldn't turn up. This runs a
-  // real IMAP SEARCH across selectable mailboxes instead, matching subject
-  // and sender, and upserts whatever it finds into the cache so those
-  // messages become fully usable (open, flag, move...) immediately, the same
-  // as anything synced normally.
+  // real IMAP SEARCH across selectable mailboxes instead, and upserts
+  // whatever it finds into the cache so those messages become fully usable
+  // (open, flag, move...) immediately, the same as anything synced normally.
   //
-  // Deliberately NOT searching message bodies: IMAP BODY search makes the
-  // server scan full message content rather than just headers, and on a real
-  // account with many folders (one test account here has 68) that pushed a
-  // single search past two minutes. A wall-clock budget bounds the worst
-  // case regardless of folder count — mailboxes are scanned in priority
-  // order (see MAILBOX_SEARCH_PRIORITY) so the budget is spent on the
-  // folders most likely to matter if it runs out before reaching them all.
-  async searchServer(accountId: string, query: string): Promise<MessageSummary[]> {
+  // options.mailboxPath, when set, searches only that one folder — in that
+  // case the time budget is generous (there's only one folder to search,
+  // body-search included, however slow IMAP BODY search is per-folder).
+  // Left null ("All Mailboxes"), every selectable mailbox is scanned in
+  // priority order (see MAILBOX_SEARCH_PRIORITY) under a tighter budget —
+  // one real account here has 68 folders, and an unscoped IMAP BODY search
+  // across all of them pushed a single search past two minutes, so the
+  // budget bounds the worst case regardless of folder count, spending it on
+  // the folders most likely to matter if it runs out before reaching them
+  // all.
+  async searchServer(accountId: string, query: string, options: SearchOptions): Promise<MessageSummary[]> {
     const trimmed = query.trim()
     if (!trimmed) return []
 
+    const criteria: Record<string, string>[] = []
+    if (options.fields.subject) criteria.push({ subject: trimmed })
+    if (options.fields.from) criteria.push({ from: trimmed })
+    if (options.fields.to) criteria.push({ to: trimmed })
+    if (options.fields.body) criteria.push({ body: trimmed })
+    if (criteria.length === 0) return []
+
+    const since = options.sinceDays != null ? new Date(Date.now() - options.sinceDays * 86400000) : null
+    const searchQuery = {
+      ...(criteria.length === 1 ? criteria[0] : { or: criteria }),
+      ...(since ? { since } : {})
+    }
+
     const client = await this.getClient(accountId)
-    const mailboxes = cachedListMailboxes(accountId)
-      .filter((m) => !m.flags.includes('\\Noselect'))
-      .sort((a, b) => (MAILBOX_SEARCH_PRIORITY[a.specialUse ?? ''] ?? 99) - (MAILBOX_SEARCH_PRIORITY[b.specialUse ?? ''] ?? 99))
+    let mailboxes = cachedListMailboxes(accountId).filter((m) => !m.flags.includes('\\Noselect'))
+    if (options.mailboxPath) {
+      mailboxes = mailboxes.filter((m) => m.path === options.mailboxPath)
+    } else {
+      mailboxes = mailboxes.sort(
+        (a, b) => (MAILBOX_SEARCH_PRIORITY[a.specialUse ?? ''] ?? 99) - (MAILBOX_SEARCH_PRIORITY[b.specialUse ?? ''] ?? 99)
+      )
+    }
     const MAX_RESULTS = 150
-    const TIME_BUDGET_MS = 12000
+    const TIME_BUDGET_MS = options.mailboxPath ? 30000 : 12000
     const deadline = Date.now() + TIME_BUDGET_MS
     const results: MessageSummary[] = []
 
@@ -458,7 +479,7 @@ export class ImapService {
       try {
         const lock = await client.getMailboxLock(mb.path)
         try {
-          const uids = await client.search({ or: [{ subject: trimmed }, { from: trimmed }] }, { uid: true })
+          const uids = await client.search(searchQuery, { uid: true })
           if (!uids || !uids.length) continue
 
           // IMAP SEARCH returns UIDs in ascending order, which tracks with

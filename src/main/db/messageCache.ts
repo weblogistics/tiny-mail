@@ -1,5 +1,5 @@
 import { getDb } from './database'
-import type { MailboxSummary, MessageBody, MessageSummary } from '@shared/types'
+import type { MailboxSummary, MessageBody, MessageSummary, SearchOptions } from '@shared/types'
 
 export function upsertMailbox(mb: MailboxSummary): void {
   getDb()
@@ -117,15 +117,55 @@ export function listMessages(accountId: string, mailboxPath: string): MessageSum
   return rows.map(rowToSummary)
 }
 
-export function searchMessages(accountId: string, query: string): MessageSummary[] {
+// The local-cache pass only ever searches the snippet (not a full body) for
+// its "body" field — the messages table never stores full message text,
+// only the ~220-char preview every row already carries, so this is a cheap
+// best-effort match that shows up instantly while the real, thorough
+// searchServer() pass (imapService.ts, a true IMAP BODY search) is still in
+// flight.
+export function searchMessages(accountId: string, query: string, options: SearchOptions): MessageSummary[] {
+  const conditions = ['accountId = ?', 'deleted = 0']
+  const params: unknown[] = [accountId]
+
+  if (options.mailboxPath) {
+    conditions.push('mailboxPath = ?')
+    params.push(options.mailboxPath)
+  }
+  if (options.sinceDays != null) {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - options.sinceDays)
+    conditions.push('date >= ?')
+    params.push(cutoff.toISOString())
+  }
+
   const like = `%${query}%`
+  const fieldClauses: string[] = []
+  if (options.fields.subject) {
+    fieldClauses.push('subject LIKE ?')
+    params.push(like)
+  }
+  if (options.fields.from) {
+    fieldClauses.push('fromJson LIKE ?')
+    params.push(like)
+  }
+  if (options.fields.to) {
+    fieldClauses.push('toJson LIKE ?')
+    params.push(like)
+  }
+  if (options.fields.body) {
+    fieldClauses.push('snippet LIKE ?')
+    params.push(like)
+  }
+  // No field selected means there's nothing to match against — rather than
+  // silently falling back to "match everything" or "match nothing via an
+  // always-false clause", just report no results.
+  if (fieldClauses.length === 0) return []
+
+  conditions.push(`(${fieldClauses.join(' OR ')})`)
+
   const rows = getDb()
-    .prepare(
-      `SELECT * FROM messages WHERE accountId = ? AND deleted = 0
-         AND (subject LIKE ? OR fromJson LIKE ? OR snippet LIKE ?)
-       ORDER BY date DESC LIMIT 200`
-    )
-    .all(accountId, like, like, like) as MessageRow[]
+    .prepare(`SELECT * FROM messages WHERE ${conditions.join(' AND ')} ORDER BY date DESC LIMIT 200`)
+    .all(...params) as MessageRow[]
   return rows.map(rowToSummary)
 }
 

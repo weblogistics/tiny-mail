@@ -80,6 +80,21 @@ export interface MessageFlags {
   deleted: boolean
 }
 
+export interface SearchFields {
+  subject: boolean
+  from: boolean
+  to: boolean
+  body: boolean
+}
+
+export interface SearchOptions {
+  // null means every mailbox in the account, not just the current one.
+  mailboxPath: string | null
+  // null means no date cutoff at all.
+  sinceDays: number | null
+  fields: SearchFields
+}
+
 export interface MessageSummary {
   accountId: string
   mailboxPath: string

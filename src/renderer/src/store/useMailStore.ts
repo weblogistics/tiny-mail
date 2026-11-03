@@ -7,6 +7,8 @@ import type {
   MailboxSummary,
   MessageBody,
   MessageSummary,
+  SearchFields,
+  SearchOptions,
   SyncProgress
 } from '@shared/types'
 import { resolveMailboxRole } from '@shared/resolveMailboxRole'
@@ -107,6 +109,12 @@ interface MailState {
   searchQuery: string
   searchResults: MessageSummary[] | null
   isSearchingServer: boolean
+  // Advanced search options, persisted across searches within the session
+  // (not saved to disk) so repeated searches keep whatever scope the user
+  // last chose rather than resetting every time.
+  searchScope: 'current' | 'all'
+  searchSinceDays: number | null
+  searchFields: SearchFields
   // Bulk selection, independent of selectedUid (the single message shown in
   // the reading pane) — a plain click sets selectedUid and clears this; a
   // Ctrl/Cmd-click, Shift-click or "select all" populates this without
@@ -145,6 +153,9 @@ interface MailState {
   setStatusNotice(notice: string | null): void
   search(query: string): Promise<void>
   clearSearch(): void
+  setSearchScope(scope: 'current' | 'all'): void
+  setSearchSinceDays(days: number | null): void
+  setSearchFields(fields: SearchFields): void
   openCompose(mode: ComposeMode, seed?: Partial<ComposeDraft>): void
   createMailbox(name: string, parentPath?: string | null): Promise<void>
   renameMailbox(path: string, newName: string): Promise<void>
@@ -205,6 +216,9 @@ export const useMailStore = create<MailState>((set, get) => ({
   searchQuery: '',
   searchResults: null,
   isSearchingServer: false,
+  searchScope: 'current',
+  searchSinceDays: null,
+  searchFields: { subject: true, from: true, to: true, body: true },
   selectedUids: new Set<string>(),
   isAccountDialogOpen: false,
   settings: null,
@@ -630,14 +644,21 @@ export const useMailStore = create<MailState>((set, get) => ({
       return
     }
 
-    const results = await window.api.messages.search(accountId, trimmed)
+    const s0 = get()
+    const options: SearchOptions = {
+      mailboxPath: s0.searchScope === 'current' ? s0.selectedMailboxPath : null,
+      sinceDays: s0.searchSinceDays,
+      fields: s0.searchFields
+    }
+
+    const results = await window.api.messages.search(accountId, trimmed, options)
     set({ searchResults: results })
 
     const myToken = ++serverSearchToken
     serverSearchTimer = setTimeout(async () => {
       set({ isSearchingServer: true })
       try {
-        const serverResults = await window.api.messages.searchServer(accountId, trimmed)
+        const serverResults = await window.api.messages.searchServer(accountId, trimmed, options)
         // The query may have changed (or search may have been cleared)
         // while this round trip was in flight — drop stale results.
         if (myToken !== serverSearchToken) return
@@ -664,6 +685,24 @@ export const useMailStore = create<MailState>((set, get) => ({
     if (serverSearchTimer) clearTimeout(serverSearchTimer)
     serverSearchToken++
     set({ searchQuery: '', searchResults: null, isSearchingServer: false })
+  },
+
+  setSearchScope(scope) {
+    set({ searchScope: scope })
+    const { searchQuery, search } = get()
+    if (searchQuery.trim()) search(searchQuery)
+  },
+
+  setSearchSinceDays(days) {
+    set({ searchSinceDays: days })
+    const { searchQuery, search } = get()
+    if (searchQuery.trim()) search(searchQuery)
+  },
+
+  setSearchFields(fields) {
+    set({ searchFields: fields })
+    const { searchQuery, search } = get()
+    if (searchQuery.trim()) search(searchQuery)
   },
 
   openCompose(mode, seed) {
