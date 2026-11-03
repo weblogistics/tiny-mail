@@ -100,6 +100,10 @@ interface MailState {
   bodyCache: Record<string, MessageBody>
   syncStatus: Record<string, SyncProgress>
   accountStatus: Record<string, 'connecting' | 'online' | 'offline' | 'error'>
+  // The actual error text for an account currently in 'error' status —
+  // tracked separately so the status bar can show *why*, not just that
+  // something failed. Cleared whenever that account reaches 'online' again.
+  accountStatusError: Record<string, string | undefined>
   searchQuery: string
   searchResults: MessageSummary[] | null
   isSearchingServer: boolean
@@ -197,6 +201,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   bodyCache: {},
   syncStatus: {},
   accountStatus: {},
+  accountStatusError: {},
   searchQuery: '',
   searchResults: null,
   isSearchingServer: false,
@@ -243,7 +248,10 @@ export const useMailStore = create<MailState>((set, get) => ({
           adjustUnreadCount(set, accountId, mailboxPath, -1)
         }
       } else if (payload.type === 'account-status') {
-        set((s) => ({ accountStatus: { ...s.accountStatus, [payload.data.accountId]: payload.data.status } }))
+        set((s) => ({
+          accountStatus: { ...s.accountStatus, [payload.data.accountId]: payload.data.status },
+          accountStatusError: { ...s.accountStatusError, [payload.data.accountId]: payload.data.error }
+        }))
       } else if (payload.type === 'settings-updated') {
         set({ settings: payload.data })
       } else if (payload.type === 'accounts-changed') {

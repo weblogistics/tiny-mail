@@ -23,6 +23,7 @@ export function StatusBar(): JSX.Element {
   const messagesByKey = useMailStore((s) => s.messagesByKey)
   const syncStatus = useMailStore((s) => s.syncStatus)
   const accountStatus = useMailStore((s) => s.accountStatus)
+  const accountStatusError = useMailStore((s) => s.accountStatusError)
   const isManualSyncing = useMailStore((s) => s.isManualSyncing)
   const isSearchingServer = useMailStore((s) => s.isSearchingServer)
   const searchResults = useMailStore((s) => s.searchResults)
@@ -52,6 +53,7 @@ export function StatusBar(): JSX.Element {
   const sync = key ? syncStatus[key] : undefined
   const syncing = Boolean(sync && !sync.done)
   const connection = selectedAccountId ? accountStatus[selectedAccountId] : undefined
+  const connectionError = selectedAccountId ? accountStatusError[selectedAccountId] : undefined
 
   const boxes = selectedAccountId ? mailboxesByAccount[selectedAccountId] ?? [] : []
   const mailbox = boxes.find((b) => b.path === selectedMailboxPath)
@@ -60,16 +62,21 @@ export function StatusBar(): JSX.Element {
   let activity: string
   if (statusNotice) {
     activity = statusNotice
-  } else if (connection === 'error') {
-    activity = 'Connection error'
-  } else if (connection === 'connecting') {
-    activity = 'Connecting…'
-  } else if (isSearchingServer) {
-    activity = 'Searching the server…'
+    // Actual activity always outranks a bare connection flag: a sync can
+    // only be progressing over a connection that's genuinely working right
+    // now, whatever a possibly-stale 'error' status claims — showing
+    // "Connection error" over real download progress is exactly what made
+    // it impossible to tell whether mail was still coming in.
   } else if (syncing && sync) {
     activity = sync.total ? `Downloading ${formatCount(sync.fetched)} of ${formatCount(sync.total)}…` : 'Downloading…'
+  } else if (isSearchingServer) {
+    activity = 'Searching the server…'
   } else if (isManualSyncing) {
     activity = 'Checking for mail…'
+  } else if (connection === 'connecting') {
+    activity = 'Connecting…'
+  } else if (connection === 'error') {
+    activity = connectionError ? `Connection error: ${connectionError}` : 'Connection error'
   } else if (lastSyncAt) {
     activity = `Last checked: ${formatSyncedAt(lastSyncAt)}`
   } else {
@@ -97,7 +104,10 @@ export function StatusBar(): JSX.Element {
           connection === 'error' ? styles.dotError : connection === 'online' ? styles.dotOnline : styles.dotIdle
         }`}
       />
-      <span className={`${styles.activity} ${statusNotice ? styles.notice : ''} ${busy ? styles.busy : ''}`}>
+      <span
+        className={`${styles.activity} ${statusNotice ? styles.notice : ''} ${busy ? styles.busy : ''}`}
+        title={connection === 'error' && connectionError ? connectionError : undefined}
+      >
         {activity}
       </span>
       <span className={styles.spacer} />

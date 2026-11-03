@@ -161,7 +161,17 @@ export class ImapService {
 
   private async getClient(accountId: string): Promise<ImapFlow> {
     const existing = this.clients.get(accountId)
-    if (existing && existing.usable) return existing
+    if (existing && existing.usable) {
+      // Re-asserts 'online' on every reuse, not just the original connect —
+      // belt-and-braces against the status bar getting stuck on a stale
+      // 'error' from an earlier transient blip that ImapFlow itself
+      // recovered from (the connection is usable right now, by definition,
+      // so whatever set 'error' no longer reflects reality). Cheap: this
+      // runs on every IMAP operation, but setting state to its own value is
+      // a no-op in the renderer.
+      this.emit({ type: 'account-status', data: { accountId, status: 'online' } })
+      return existing
+    }
 
     const account = this.accountStore.get(accountId)
     if (!account) throw new Error(`Unknown account: ${accountId}`)
