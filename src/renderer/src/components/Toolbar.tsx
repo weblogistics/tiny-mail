@@ -18,9 +18,11 @@ export function Toolbar(): JSX.Element {
   const searchScope = useMailStore((s) => s.searchScope)
   const searchSinceDays = useMailStore((s) => s.searchSinceDays)
   const searchFields = useMailStore((s) => s.searchFields)
+  const searchHasAttachment = useMailStore((s) => s.searchHasAttachment)
   const setSearchScope = useMailStore((s) => s.setSearchScope)
   const setSearchSinceDays = useMailStore((s) => s.setSearchSinceDays)
   const setSearchFields = useMailStore((s) => s.setSearchFields)
+  const setSearchHasAttachment = useMailStore((s) => s.setSearchHasAttachment)
   const getMail = useMailStore((s) => s.getMail)
   const isManualSyncing = useMailStore((s) => s.isManualSyncing)
   const openCompose = useMailStore((s) => s.openCompose)
@@ -42,8 +44,13 @@ export function Toolbar(): JSX.Element {
     const handleClick = (e: MouseEvent): void => {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) setAdvancedOpen(false)
     }
-    window.addEventListener('mousedown', handleClick)
-    return () => window.removeEventListener('mousedown', handleClick)
+    // 'click' rather than 'mousedown': mousedown fires (and used to close
+    // the panel) before the toggle button's own click handler re-opens it,
+    // which is exactly the race that made the toggle button unusable.
+    // Listening on 'click' here puts both on the same, later event so there
+    // is nothing left to race.
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
   }, [advancedOpen])
 
   return (
@@ -87,7 +94,7 @@ export function Toolbar(): JSX.Element {
           </button>
         )}
         <button
-          className={`${styles.advancedToggle} ${advancedOpen ? styles.advancedToggleActive : ''}`}
+          className={`${styles.advancedToggle} no-drag ${advancedOpen ? styles.advancedToggleActive : ''}`}
           title="Search Options"
           onClick={() => setAdvancedOpen((v) => !v)}
         >
@@ -99,9 +106,11 @@ export function Toolbar(): JSX.Element {
             scope={searchScope}
             sinceDays={searchSinceDays}
             fields={searchFields}
+            hasAttachment={searchHasAttachment}
             onScopeChange={setSearchScope}
             onSinceDaysChange={setSearchSinceDays}
             onFieldsChange={setSearchFields}
+            onHasAttachmentChange={setSearchHasAttachment}
           />
         )}
       </div>

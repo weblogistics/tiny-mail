@@ -6,9 +6,11 @@ interface AdvancedSearchProps {
   scope: 'current' | 'all'
   sinceDays: number | null
   fields: SearchFields
+  hasAttachment: boolean
   onScopeChange: (scope: 'current' | 'all') => void
   onSinceDaysChange: (days: number | null) => void
   onFieldsChange: (fields: SearchFields) => void
+  onHasAttachmentChange: (value: boolean) => void
 }
 
 const SINCE_OPTIONS: { label: string; days: number | null }[] = [
@@ -25,9 +27,11 @@ export function AdvancedSearch({
   scope,
   sinceDays,
   fields,
+  hasAttachment,
   onScopeChange,
   onSinceDaysChange,
-  onFieldsChange
+  onFieldsChange,
+  onHasAttachmentChange
 }: AdvancedSearchProps): JSX.Element {
   const toggleField = (key: keyof SearchFields): void => {
     const next = { ...fields, [key]: !fields[key] }
@@ -38,7 +42,7 @@ export function AdvancedSearch({
   }
 
   return (
-    <div className={styles.panel}>
+    <div className={`${styles.panel} no-drag`}>
       <div className={styles.section}>
         <div className={styles.label}>Search In</div>
         <div className={styles.segmented}>
@@ -91,6 +95,17 @@ export function AdvancedSearch({
         <label className={styles.checkbox}>
           <input type="checkbox" checked={fields.body} onChange={() => toggleField('body')} />
           Message Body
+        </label>
+      </div>
+
+      <div className={styles.section}>
+        <label className={styles.checkbox}>
+          <input
+            type="checkbox"
+            checked={hasAttachment}
+            onChange={(e) => onHasAttachmentChange(e.target.checked)}
+          />
+          Has Attachment
         </label>
       </div>
     </div>

@@ -115,6 +115,7 @@ interface MailState {
   searchScope: 'current' | 'all'
   searchSinceDays: number | null
   searchFields: SearchFields
+  searchHasAttachment: boolean
   // Bulk selection, independent of selectedUid (the single message shown in
   // the reading pane) — a plain click sets selectedUid and clears this; a
   // Ctrl/Cmd-click, Shift-click or "select all" populates this without
@@ -156,6 +157,7 @@ interface MailState {
   setSearchScope(scope: 'current' | 'all'): void
   setSearchSinceDays(days: number | null): void
   setSearchFields(fields: SearchFields): void
+  setSearchHasAttachment(value: boolean): void
   openCompose(mode: ComposeMode, seed?: Partial<ComposeDraft>): void
   createMailbox(name: string, parentPath?: string | null): Promise<void>
   renameMailbox(path: string, newName: string): Promise<void>
@@ -219,6 +221,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   searchScope: 'current',
   searchSinceDays: null,
   searchFields: { subject: true, from: true, to: true, body: true },
+  searchHasAttachment: false,
   selectedUids: new Set<string>(),
   isAccountDialogOpen: false,
   settings: null,
@@ -648,7 +651,8 @@ export const useMailStore = create<MailState>((set, get) => ({
     const options: SearchOptions = {
       mailboxPath: s0.searchScope === 'current' ? s0.selectedMailboxPath : null,
       sinceDays: s0.searchSinceDays,
-      fields: s0.searchFields
+      fields: s0.searchFields,
+      hasAttachment: s0.searchHasAttachment
     }
 
     const results = await window.api.messages.search(accountId, trimmed, options)
@@ -701,6 +705,12 @@ export const useMailStore = create<MailState>((set, get) => ({
 
   setSearchFields(fields) {
     set({ searchFields: fields })
+    const { searchQuery, search } = get()
+    if (searchQuery.trim()) search(searchQuery)
+  },
+
+  setSearchHasAttachment(value) {
+    set({ searchHasAttachment: value })
     const { searchQuery, search } = get()
     if (searchQuery.trim()) search(searchQuery)
   },

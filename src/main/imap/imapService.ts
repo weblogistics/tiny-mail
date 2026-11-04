@@ -520,7 +520,7 @@ export class ImapService {
             }
             upsertMessage(summary)
             if (indexContacts) indexContactsFromMessage(summary)
-            results.push(summary)
+            if (!options.hasAttachment || hasAttachments) results.push(summary)
           }
         } finally {
           lock.release()

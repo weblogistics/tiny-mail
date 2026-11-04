@@ -137,6 +137,9 @@ export function searchMessages(accountId: string, query: string, options: Search
     conditions.push('date >= ?')
     params.push(cutoff.toISOString())
   }
+  if (options.hasAttachment) {
+    conditions.push('hasAttachments = 1')
+  }
 
   const like = `%${query}%`
   const fieldClauses: string[] = []

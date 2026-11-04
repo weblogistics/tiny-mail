@@ -93,6 +93,8 @@ export interface SearchOptions {
   // null means no date cutoff at all.
   sinceDays: number | null
   fields: SearchFields
+  // true means only match messages with at least one attachment.
+  hasAttachment: boolean
 }
 
 export interface MessageSummary {
