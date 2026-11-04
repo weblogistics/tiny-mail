@@ -289,7 +289,8 @@ export class ImapService {
       // cached message can legitimately be older than this sync's own
       // SEARCH SINCE cutoff (synced earlier under a longer-window setting,
       // say) without actually having been deleted — only cached messages
-      // that fall *inside* the window this sync actually queried can be
+      // that fall *inside* the window this sync actually queried (by date,
+      // or because they were unread — see the unread SEARCH above) can be
       // trusted to appear in the results if they still exist on the server.
       // null means "All Mail": every cached message for this mailbox is in
       // scope, since '1:*' below covers the whole thing.
@@ -297,7 +298,17 @@ export class ImapService {
       if (sinceDays > 0) {
         cutoffDate = new Date()
         cutoffDate.setDate(cutoffDate.getDate() - sinceDays)
-        const uids = (await client.search({ since: cutoffDate }, { uid: true })) || []
+        const [withinWindow, unread] = await Promise.all([
+          client.search({ since: cutoffDate }, { uid: true }),
+          // Unread messages are always included regardless of age: the
+          // mailbox's unread badge comes from the server's STATUS, unrelated
+          // to this lookback window, so without this a folder with no
+          // recent mail could show a real unread count in the sidebar while
+          // actually being empty once opened — exactly the "folder shows
+          // unread but there's nothing there" bug this fixes.
+          client.search({ seen: false }, { uid: true })
+        ])
+        const uids = Array.from(new Set([...(withinWindow || []), ...(unread || [])]))
         if (uids.length === 0) {
           this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: 0, total: 0, done: true } })
           return
@@ -384,7 +395,7 @@ export class ImapService {
       // the "doesn't seem to work all the time" gap. Covers push-triggered
       // and interval syncs too, since they all funnel through this method.
       for (const existing of existingByUid.values()) {
-        if (cutoffDate && new Date(existing.date) < cutoffDate) continue
+        if (cutoffDate && new Date(existing.date) < cutoffDate && existing.flags.seen) continue
         if (!seenUids.has(existing.uid)) {
           removeMessage(accountId, mailboxPath, existing.uid)
           this.emit({ type: 'message-removed', data: { accountId, mailboxPath, uid: existing.uid } })
