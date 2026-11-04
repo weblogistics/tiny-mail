@@ -24,8 +24,11 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
 
+/* 'system' (no data-theme attribute) follows the OS setting; an explicit
+   'light'/'dark' choice (data-theme attribute, set by useAppTheme) always
+   wins over it. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --sidebar-bg: #1e1f22;
     --list-bg: #232428;
     --list-bg-alt: #1f2024;
@@ -39,6 +42,21 @@
     --accent-soft: rgba(10, 132, 255, 0.2);
     --selection-bg-inactive: #3a3b3f;
   }
+}
+
+:root[data-theme='dark'] {
+  --sidebar-bg: #1e1f22;
+  --list-bg: #232428;
+  --list-bg-alt: #1f2024;
+  --reading-bg: #232428;
+  --toolbar-bg: #2a2b2f;
+  --border: #35363a;
+  --text-primary: #f2f2f3;
+  --text-secondary: #a9a9ad;
+  --text-tertiary: #7c7c80;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.2);
+  --selection-bg-inactive: #3a3b3f;
 }
 
 * {

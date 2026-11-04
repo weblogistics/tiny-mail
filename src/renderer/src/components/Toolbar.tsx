@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import { TrafficLights } from './TrafficLights'
+import { ThemeToggle } from './ThemeToggle'
 import { AdvancedSearch } from './AdvancedSearch'
 import { IconChevronDown, IconCompose, IconGetMail, IconSearch, IconSidebar } from './Icons'
 import styles from './Toolbar.module.css'
@@ -64,6 +65,8 @@ export function Toolbar(): JSX.Element {
       >
         <IconSidebar />
       </button>
+
+      <ThemeToggle className={`${styles.iconButton} no-drag`} />
 
       <button
         className={`${styles.iconButton} ${isManualSyncing ? styles.spinning : ''} no-drag`}

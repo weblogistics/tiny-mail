@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AccountConfig, ComposeAttachment, ComposeDraft, ComposeMode } from '@shared/types'
 import { TrafficLights } from './components/TrafficLights'
+import { ThemeToggle } from './components/ThemeToggle'
 import { RichTextToolbar } from './components/RichTextToolbar'
 import { AddressField } from './components/AddressField'
 import { IconClose, IconPaperclip } from './components/Icons'
@@ -110,7 +111,9 @@ export function ComposeStandalone(): JSX.Element | null {
       <div className={`${styles.titleBar} drag-region`}>
         <TrafficLights />
         <span className={styles.title}>{titleFor(mode)}</span>
-        <div className={styles.titleBarSpacer} />
+        <div className={styles.titleBarSpacer}>
+          <ThemeToggle className={`${styles.themeToggle} no-drag`} />
+        </div>
       </div>
 
       <div className={styles.fields}>

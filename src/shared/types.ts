@@ -208,6 +208,9 @@ export interface AppSettings {
   // How far back to download message history per mailbox, in days.
   // 0 means "All Mail" — no date cutoff, every message in the mailbox.
   syncLookbackDays: number
+  // 'system' follows the OS appearance setting; 'light'/'dark' override it
+  // for every window (main, compose, settings — they share one CSS bundle).
+  theme: 'system' | 'light' | 'dark'
 }
 
 export type MailEventPayload =

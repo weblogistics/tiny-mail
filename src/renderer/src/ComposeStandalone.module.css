@@ -25,6 +25,29 @@
 
 .titleBarSpacer {
   width: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.themeToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.themeToggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.themeToggle:hover {
+  background: rgba(128, 128, 128, 0.14);
+  color: var(--text-primary);
 }
 
 .fields {

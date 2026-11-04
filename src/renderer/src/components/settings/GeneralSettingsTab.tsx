@@ -19,6 +19,37 @@ export function GeneralSettingsTab(): JSX.Element {
   return (
     <div>
       <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>Appearance</h3>
+        <label className={styles.radioRow}>
+          <input
+            type="radio"
+            name="theme"
+            checked={settings.theme === 'system'}
+            onChange={() => update({ theme: 'system' })}
+          />
+          Match system setting
+        </label>
+        <label className={styles.radioRow}>
+          <input
+            type="radio"
+            name="theme"
+            checked={settings.theme === 'light'}
+            onChange={() => update({ theme: 'light' })}
+          />
+          Light
+        </label>
+        <label className={styles.radioRow}>
+          <input
+            type="radio"
+            name="theme"
+            checked={settings.theme === 'dark'}
+            onChange={() => update({ theme: 'dark' })}
+          />
+          Dark
+        </label>
+      </section>
+
+      <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Checking for Mail</h3>
         <label className={styles.radioRow}>
           <input

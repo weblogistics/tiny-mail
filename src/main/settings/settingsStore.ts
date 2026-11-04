@@ -9,7 +9,8 @@ const defaults: AppSettings = {
   syncMode: 'interval',
   syncIntervalSeconds: 60,
   groupByThread: false,
-  syncLookbackDays: 30
+  syncLookbackDays: 30,
+  theme: 'system'
 }
 
 export class SettingsStore {
