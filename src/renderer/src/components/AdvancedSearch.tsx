@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import type { SearchFields } from '@shared/types'
 import styles from './AdvancedSearch.module.css'
 
@@ -10,7 +9,6 @@ interface AdvancedSearchProps {
   onScopeChange: (scope: 'current' | 'all') => void
   onSinceDaysChange: (days: number | null) => void
   onFieldsChange: (fields: SearchFields) => void
-  onClose: () => void
 }
 
 const SINCE_OPTIONS: { label: string; days: number | null }[] = [
@@ -29,19 +27,8 @@ export function AdvancedSearch({
   fields,
   onScopeChange,
   onSinceDaysChange,
-  onFieldsChange,
-  onClose
+  onFieldsChange
 }: AdvancedSearchProps): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    window.addEventListener('mousedown', handleClick)
-    return () => window.removeEventListener('mousedown', handleClick)
-  }, [onClose])
-
   const toggleField = (key: keyof SearchFields): void => {
     const next = { ...fields, [key]: !fields[key] }
     // Keep at least one field selected — with none on, nothing could ever
@@ -51,7 +38,7 @@ export function AdvancedSearch({
   }
 
   return (
-    <div ref={ref} className={styles.panel} onMouseDown={(e) => e.stopPropagation()}>
+    <div className={styles.panel}>
       <div className={styles.section}>
         <div className={styles.label}>Search In</div>
         <div className={styles.segmented}>

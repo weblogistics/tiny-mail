@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMailStore } from '../store/useMailStore'
 import { TrafficLights } from './TrafficLights'
 import { AdvancedSearch } from './AdvancedSearch'
@@ -8,6 +8,7 @@ import styles from './Toolbar.module.css'
 export function Toolbar(): JSX.Element {
   const [searchFocused, setSearchFocused] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const searchRef = useRef<HTMLDivElement>(null)
   const selectedAccountId = useMailStore((s) => s.selectedAccountId)
   const selectedMailboxPath = useMailStore((s) => s.selectedMailboxPath)
   const mailboxesByAccount = useMailStore((s) => s.mailboxesByAccount)
@@ -29,6 +30,21 @@ export function Toolbar(): JSX.Element {
       mailboxesByAccount[selectedAccountId]?.find((b) => b.path === selectedMailboxPath)?.name) ||
     null
   const searchPlaceholder = searchScope === 'current' ? `Search ${currentMailboxName ?? 'Mailbox'}` : 'Search All Mailboxes'
+
+  // Closing on an outside click is handled here, against the whole search
+  // widget (input + toggle + panel), rather than inside AdvancedSearch
+  // against just the panel. Scoping it to only the panel let a click on the
+  // toggle button itself count as "outside" — the button's own onClick
+  // toggle and this listener's onClose then fired for the same click and
+  // fought each other, so the panel could never actually stay open.
+  useEffect(() => {
+    if (!advancedOpen) return
+    const handleClick = (e: MouseEvent): void => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setAdvancedOpen(false)
+    }
+    window.addEventListener('mousedown', handleClick)
+    return () => window.removeEventListener('mousedown', handleClick)
+  }, [advancedOpen])
 
   return (
     <div className={`${styles.toolbar} drag-region`}>
@@ -53,7 +69,10 @@ export function Toolbar(): JSX.Element {
 
       <div className={styles.spacer} />
 
-      <div className={`${styles.search} no-drag ${searchFocused ? styles.searchFocused : ''}`}>
+      <div
+        ref={searchRef}
+        className={`${styles.search} no-drag ${searchFocused || advancedOpen ? styles.searchFocused : ''}`}
+      >
         <IconSearch width={13} height={13} />
         <input
           placeholder={searchPlaceholder}
@@ -72,7 +91,7 @@ export function Toolbar(): JSX.Element {
           title="Search Options"
           onClick={() => setAdvancedOpen((v) => !v)}
         >
-          <IconChevronDown width={11} height={11} />
+          <IconChevronDown width={13} height={13} />
         </button>
         {advancedOpen && (
           <AdvancedSearch
@@ -83,7 +102,6 @@ export function Toolbar(): JSX.Element {
             onScopeChange={setSearchScope}
             onSinceDaysChange={setSearchSinceDays}
             onFieldsChange={setSearchFields}
-            onClose={() => setAdvancedOpen(false)}
           />
         )}
       </div>

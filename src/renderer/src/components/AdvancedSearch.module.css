@@ -71,3 +71,9 @@
   gap: 6px;
   color: var(--text-primary);
 }
+
+.checkbox input {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
