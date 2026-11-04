@@ -1,6 +1,6 @@
 {
   "name": "tiny-mail",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "A desktop IMAP/SMTP email client inspired by Apple Mail",
   "main": "./out/main/index.js",
   "author": "Tiny Mail",
