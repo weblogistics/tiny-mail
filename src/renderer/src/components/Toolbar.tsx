@@ -89,13 +89,29 @@ export function Toolbar(): JSX.Element {
           onBlur={() => setSearchFocused(false)}
         />
         {searchQuery && (
-          <button className={styles.clearSearch} onClick={clearSearch}>
+          <button
+            className={styles.clearSearch}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={clearSearch}
+          >
             ×
           </button>
         )}
         <button
           className={`${styles.advancedToggle} no-drag ${advancedOpen ? styles.advancedToggleActive : ''}`}
           title="Search Options"
+          // Clicking this button would otherwise blur the search input first
+          // (as any mousedown on a different element does), which — while
+          // the input was focused, i.e. exactly when there's already a
+          // query — immediately shrinks the search box back to its
+          // unfocused width mid-click. On a real (non-instant) mouse click,
+          // that shift happens between mousedown and mouseup, so the click
+          // lands wherever the box's content ended up, not on this button —
+          // most often back on the input itself, which just refocuses it
+          // and makes the toggle look like it silently did nothing.
+          // preventDefault on mousedown stops the browser from moving focus
+          // at all, so the box never moves under the cursor mid-click.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => setAdvancedOpen((v) => !v)}
         >
           <IconChevronDown width={13} height={13} />
