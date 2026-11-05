@@ -14,8 +14,8 @@ import {
   upsertMailbox,
   upsertMessage
 } from '../db/messageCache'
-import { analyzeBodyStructure } from './bodyStructure'
-import { resolveInlineImages } from './inlineImageResolver'
+import { analyzeBodyStructure, extractBodyParts } from './bodyStructure'
+import { resolveInlineImages, type InlineImage } from './inlineImageResolver'
 import { indexContactsFromMessage } from '../db/contactsStore'
 import type {
   ConnectionSecurity,
@@ -86,6 +86,24 @@ function extractReturnPath(headers: Map<string, unknown>): string | null {
   const entries = Array.isArray(raw) ? raw : raw ? [raw] : []
   const first = entries[0] as { value?: { address?: string }[] } | undefined
   return first?.value?.[0]?.address || null
+}
+
+// Same intent as extractReturnPath above, but against the raw header block
+// text directly (what the selective-fetch body path has) rather than
+// mailparser's already-structured headers Map. Return-Path is always a
+// single bare address in angle brackets (or an empty "<>" for a bounce) —
+// no display name, no encoding — so a direct regex is reliable here in a
+// way it wouldn't be for a header like From that needs real address
+// parsing.
+function extractReturnPathFromRaw(rawHeaders: string): string | null {
+  const match = rawHeaders.match(/^Return-Path:\s*<([^>]*)>/im)
+  return match && match[1] ? match[1] : null
+}
+
+async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  for await (const chunk of stream) chunks.push(chunk as Buffer)
+  return Buffer.concat(chunks)
 }
 
 // Many self-hosted/smaller IMAP servers don't advertise RFC 6154 SPECIAL-USE
@@ -545,14 +563,36 @@ export class ImapService {
     return results
   }
 
-  // Attachment bytes aren't cached anywhere (only their metadata is, in
-  // MessageBody) — opening or saving one re-downloads and re-parses the
-  // full raw message. `partId` is this parse's attachment array index
-  // rather than a real IMAP BODYSTRUCTURE part specifier, which only
-  // works because both getMessageBody() and getAttachmentContent() go
-  // through this same helper: mailparser walks a message's MIME parts in
-  // a fixed, deterministic order, so re-parsing the identical bytes always
-  // reproduces the same attachments array in the same order.
+  // Last-resort fallback for getMessageBody/getAttachmentContent: downloads
+  // and fully parses the entire raw message, attachments and all. Used only
+  // when a message's bodyStructure doesn't yield a usable text/html part
+  // (or is missing outright) — astronomically rare for a real message, but
+  // cheaper to handle than to assume away. `partId` for attachments found
+  // this way is a "legacy:<array index>" marker rather than a real IMAP
+  // BODYSTRUCTURE part specifier (mailparser doesn't preserve one), which
+  // getAttachmentContent above recognizes and routes back through this same
+  // full-parse path so the index still means the same thing both times.
+  //
+  // Split into a lock-free core (for getMessageBody, which calls this as a
+  // fallback from within a mailbox lock it's already holding) and a
+  // locking wrapper (for getAttachmentContent's standalone legacy branch).
+  private async downloadAndParseRaw(
+    client: ImapFlow,
+    accountId: string,
+    mailboxPath: string,
+    uid: number
+  ): Promise<Awaited<ReturnType<typeof simpleParser>>> {
+    const { content } = await client.download(String(uid), undefined, { uid: true })
+    if (!content) {
+      // Drop the phantom row so the list stops offering a message that can
+      // never be opened, and tell the renderer why it disappeared.
+      removeMessage(accountId, mailboxPath, uid)
+      this.emit({ type: 'message-removed', data: { accountId, mailboxPath, uid } })
+      throw new Error(MESSAGE_GONE_CODE)
+    }
+    return await simpleParser(content)
+  }
+
   private async downloadAndParse(
     accountId: string,
     mailboxPath: string,
@@ -561,15 +601,7 @@ export class ImapService {
     const client = await this.getClient(accountId)
     const lock = await client.getMailboxLock(mailboxPath)
     try {
-      const { content } = await client.download(String(uid), undefined, { uid: true })
-      if (!content) {
-        // Drop the phantom row so the list stops offering a message that can
-        // never be opened, and tell the renderer why it disappeared.
-        removeMessage(accountId, mailboxPath, uid)
-        this.emit({ type: 'message-removed', data: { accountId, mailboxPath, uid } })
-        throw new Error(MESSAGE_GONE_CODE)
-      }
-      return await simpleParser(content)
+      return await this.downloadAndParseRaw(client, accountId, mailboxPath, uid)
     } finally {
       lock.release()
     }
@@ -581,16 +613,46 @@ export class ImapService {
     uid: number,
     partId: string
   ): Promise<{ filename: string; contentType: string; content: Buffer }> {
-    const parsed = await this.downloadAndParse(accountId, mailboxPath, uid)
-    const attachment = (parsed.attachments || [])[Number(partId)]
-    if (!attachment) throw new Error(`Attachment part ${partId} not found on message ${uid}`)
-    return {
-      filename: attachment.filename || `attachment-${partId}`,
-      contentType: attachment.contentType,
-      content: attachment.content
+    if (partId.startsWith('legacy:')) {
+      const parsed = await this.downloadAndParse(accountId, mailboxPath, uid)
+      const attachment = (parsed.attachments || [])[Number(partId.slice('legacy:'.length))]
+      if (!attachment) throw new Error(`Attachment part ${partId} not found on message ${uid}`)
+      return {
+        filename: attachment.filename || `attachment-${partId}`,
+        contentType: attachment.contentType,
+        content: attachment.content
+      }
+    }
+
+    const client = await this.getClient(accountId)
+    const lock = await client.getMailboxLock(mailboxPath)
+    try {
+      const { meta, content } = await client.download(String(uid), partId, { uid: true })
+      if (!content) {
+        removeMessage(accountId, mailboxPath, uid)
+        this.emit({ type: 'message-removed', data: { accountId, mailboxPath, uid } })
+        throw new Error(MESSAGE_GONE_CODE)
+      }
+      return {
+        filename: meta?.filename || `attachment-${partId}`,
+        contentType: meta?.contentType || 'application/octet-stream',
+        content: await streamToBuffer(content)
+      }
+    } finally {
+      lock.release()
     }
   }
 
+  // Downloads only what's needed to render the message: the bodyStructure
+  // itself (cheap — no content), then the html part if there is one or
+  // else the text part, plus the bytes for any inline-referenced images the
+  // html actually uses. A real attachment's bytes are never touched here —
+  // its metadata (filename/size/contentType) comes straight from
+  // bodyStructure, and the content is fetched separately, on demand, only
+  // if the user opens or saves it. Previously this always downloaded the
+  // *entire* raw message (every attachment included) just to show the
+  // text, which made opening a message with a large attachment as slow as
+  // downloading that attachment.
   async getMessageBody(accountId: string, mailboxPath: string, uid: number): Promise<MessageBody> {
     const cached = getMessageBody(accountId, mailboxPath, uid)
     // A row cached before rawHeaders/replyTo/returnPath existed has an
@@ -601,37 +663,109 @@ export class ImapService {
     // anything synced before this feature shipped.
     if (cached && cached.rawHeaders) return cached
 
-    const parsed = await this.downloadAndParse(accountId, mailboxPath, uid)
+    const client = await this.getClient(accountId)
+    const lock = await client.getMailboxLock(mailboxPath)
+    try {
+      const info = await client.fetchOne(
+        String(uid),
+        { uid: true, envelope: true, bodyStructure: true, headers: true },
+        { uid: true }
+      )
+      if (!info) {
+        removeMessage(accountId, mailboxPath, uid)
+        this.emit({ type: 'message-removed', data: { accountId, mailboxPath, uid } })
+        throw new Error(MESSAGE_GONE_CODE)
+      }
 
-    const attachments: MessageAttachment[] = (parsed.attachments || []).map((a, idx) => ({
-      filename: a.filename || `attachment-${idx + 1}`,
-      contentType: a.contentType,
-      size: a.size,
-      partId: String(idx),
-      contentId: a.cid,
-      inline: a.contentDisposition === 'inline'
-    }))
+      const { htmlPartId, textPartId, parts } = extractBodyParts(info.bodyStructure)
 
-    const rawHtml = typeof parsed.html === 'string' ? parsed.html : null
+      // No usable body part found via bodyStructure at all (an exotic or
+      // malformed message) — fall back to the old, slower but bulletproof
+      // full-parse path rather than show a blank message.
+      if (!htmlPartId && !textPartId) {
+        const parsed = await this.downloadAndParseRaw(client, accountId, mailboxPath, uid)
+        const attachments: MessageAttachment[] = (parsed.attachments || []).map((a, idx) => ({
+          filename: a.filename || `attachment-${idx + 1}`,
+          contentType: a.contentType,
+          size: a.size,
+          partId: `legacy:${idx}`,
+          contentId: a.cid,
+          inline: a.contentDisposition === 'inline'
+        }))
+        const rawHtml = typeof parsed.html === 'string' ? parsed.html : null
+        const body: MessageBody = {
+          accountId,
+          mailboxPath,
+          uid,
+          html: rawHtml ? resolveInlineImages(rawHtml, parsed.attachments || []) : null,
+          text: parsed.text || null,
+          attachments,
+          replyTo: toAddresses(parsed.replyTo?.value),
+          returnPath: extractReturnPath(parsed.headers),
+          rawHeaders: parsed.headerLines.map((h) => h.line).join('\n')
+        }
+        saveMessageBody(body)
+        return body
+      }
 
-    const body: MessageBody = {
-      accountId,
-      mailboxPath,
-      uid,
-      html: rawHtml ? resolveInlineImages(rawHtml, parsed.attachments || []) : null,
-      text: parsed.text || null,
-      attachments,
-      replyTo: toAddresses(parsed.replyTo?.value),
-      returnPath: extractReturnPath(parsed.headers),
-      // headerLines preserves the message exactly as received (original
-      // folding, casing, header order, duplicates) — the parsed fields
-      // above only cover headers this app already knows how to interpret,
-      // but a forged message is caught by things like Authentication-Results
-      // or an unexpected Received chain, which only exist here.
-      rawHeaders: parsed.headerLines.map((h) => h.line).join('\n')
+      const rawHeaders = info.headers ? info.headers.toString('utf-8') : ''
+
+      let html: string | null = null
+      let text: string | null = null
+      if (htmlPartId) {
+        const { content } = await client.download(String(uid), htmlPartId, { uid: true })
+        html = content ? (await streamToBuffer(content)).toString('utf-8') : null
+      } else if (textPartId) {
+        const { content } = await client.download(String(uid), textPartId, { uid: true })
+        text = content ? (await streamToBuffer(content)).toString('utf-8') : null
+      }
+
+      // Only fetch bytes for inline images the html actually references —
+      // a part can be flagged "inline" by disposition/content-id alone
+      // without the html ever using it.
+      if (html) {
+        const inlineImages: InlineImage[] = []
+        for (const part of parts) {
+          if (!part.inline || !part.contentId || !html.includes(`cid:${part.contentId}`)) continue
+          const { content } = await client.download(String(uid), part.partId, { uid: true })
+          if (!content) continue
+          inlineImages.push({
+            cid: part.contentId,
+            contentType: part.contentType,
+            content: await streamToBuffer(content)
+          })
+        }
+        html = resolveInlineImages(html, inlineImages)
+      }
+
+      const attachments: MessageAttachment[] = parts.map((p) => ({
+        filename: p.filename,
+        contentType: p.contentType,
+        size: p.size,
+        partId: p.partId,
+        contentId: p.contentId ?? undefined,
+        inline: p.inline
+      }))
+
+      const body: MessageBody = {
+        accountId,
+        mailboxPath,
+        uid,
+        html,
+        text,
+        attachments,
+        replyTo: toAddresses(info.envelope?.replyTo),
+        returnPath: extractReturnPathFromRaw(rawHeaders),
+        // The raw header block exactly as the server sent it (folding and
+        // casing intact) — more faithful than reconstructing it from
+        // mailparser's parsed header lines, and cheaper to get besides.
+        rawHeaders
+      }
+      saveMessageBody(body)
+      return body
+    } finally {
+      lock.release()
     }
-    saveMessageBody(body)
-    return body
   }
 
   async setFlags(

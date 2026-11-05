@@ -1,19 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { resolveInlineImages } from './inlineImageResolver'
-import type { Attachment } from 'mailparser'
+import { resolveInlineImages, type InlineImage } from './inlineImageResolver'
 
-function attachment(overrides: Partial<Attachment>): Attachment {
+function attachment(overrides: Partial<InlineImage>): InlineImage {
   return {
-    type: 'attachment',
     contentType: 'image/png',
-    partId: '2',
-    headers: new Map() as never,
     content: Buffer.from('fake-image-bytes'),
-    release: null,
-    checksum: '',
-    size: 17,
     ...overrides
-  } as Attachment
+  }
 }
 
 describe('resolveInlineImages', () => {
