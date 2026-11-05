@@ -21,6 +21,14 @@ export function resultKey(m: MessageSummary): string {
   return `${m.accountId}:${m.mailboxPath}:${m.uid}`
 }
 
+// Drops any message a delete/move already optimistically removed locally
+// but that the server hasn't confirmed gone yet, from a fresh list fetched
+// out from under that in-flight action (see MailState.pendingRemovals).
+function dropPending(msgs: MessageSummary[], pendingRemovals: Set<string>): MessageSummary[] {
+  if (pendingRemovals.size === 0) return msgs
+  return msgs.filter((m) => !pendingRemovals.has(resultKey(m)))
+}
+
 // Which message a UID refers to depends on what's on screen: server search
 // results span every mailbox, so a UID shown there can belong to a folder
 // other than the one selected in the sidebar. Acting on selectedMailboxPath
@@ -98,6 +106,13 @@ interface MailState {
   mailboxesByAccount: Record<string, MailboxSummary[]>
   selectedMailboxPath: string | null
   messagesByKey: Record<string, MessageSummary[]>
+  // UIDs optimistically removed locally (delete/move in flight) but not yet
+  // confirmed gone server-side. A concurrent sync's own messages.list()
+  // refetch overwrites messagesByKey wholesale — without this, that refetch
+  // would momentarily resurrect a message someone just deleted or moved,
+  // since the real server-side delete is serialized behind the sync on the
+  // same IMAP connection and hasn't actually removed it from the cache yet.
+  pendingRemovals: Set<string>
   selectedUid: number | null
   bodyCache: Record<string, MessageBody>
   syncStatus: Record<string, SyncProgress>
@@ -180,11 +195,14 @@ async function performBulkMove(set: SetFn, selected: MessageSummary[], destPath:
       const k = key(g.accountId, g.mailboxPath)
       nextMessagesByKey[k] = (nextMessagesByKey[k] ?? []).filter((m) => !removedKeys.has(resultKey(m)))
     }
+    const nextPending = new Set(s.pendingRemovals)
+    for (const k of removedKeys) nextPending.add(k)
     return {
       messagesByKey: nextMessagesByKey,
       searchResults: s.searchResults?.filter((m) => !removedKeys.has(resultKey(m))) ?? null,
       selectedUid: selected.some((m) => m.uid === s.selectedUid) ? null : s.selectedUid,
-      selectedUids: new Set<string>()
+      selectedUids: new Set<string>(),
+      pendingRemovals: nextPending
     }
   })
 
@@ -201,6 +219,16 @@ async function performBulkMove(set: SetFn, selected: MessageSummary[], destPath:
     set({ statusNotice: `Couldn't move some messages: ${err instanceof Error ? err.message : String(err)}` })
     for (const g of groups.values()) window.api.mail.sync(g.accountId, g.mailboxPath).catch(() => void 0)
     throw err
+  } finally {
+    // Whether the move succeeded or failed, these messages are no longer
+    // "an in-flight removal a refetch must not undo" — on success the
+    // server-side move is done; on failure the recovery resync just kicked
+    // off above needs to be free to bring them back.
+    set((s) => {
+      const nextPending = new Set(s.pendingRemovals)
+      for (const k of removedKeys) nextPending.delete(k)
+      return { pendingRemovals: nextPending }
+    })
   }
 }
 
@@ -210,6 +238,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   mailboxesByAccount: {},
   selectedMailboxPath: null,
   messagesByKey: {},
+  pendingRemovals: new Set<string>(),
   selectedUid: null,
   bodyCache: {},
   syncStatus: {},
@@ -233,9 +262,24 @@ export const useMailStore = create<MailState>((set, get) => ({
     window.api.events.subscribe((payload) => {
       if (payload.type === 'sync-progress') {
         set((s) => ({ syncStatus: { ...s.syncStatus, [key(payload.data.accountId, payload.data.mailboxPath)]: payload.data } }))
-        if (payload.data.accountId === get().selectedAccountId && payload.data.mailboxPath === get().selectedMailboxPath) {
+        // Only refetch the list once a sync actually finishes, not on every
+        // intermediate tick (there's one per message during the snippet
+        // backfill phase — hundreds on a big first sync). The messages
+        // themselves are already upserted before any of these ticks fire;
+        // all a tick adds is a snippet for one more row, which isn't worth
+        // a full list refetch, and refetching repeatedly throughout a long
+        // sync is also what let a delete/move made mid-sync keep getting
+        // visibly undone by a refetch that ran before the delete/move's own
+        // IMAP command — queued behind the same sync on the same mailbox
+        // lock — had actually completed.
+        if (
+          payload.data.done &&
+          payload.data.accountId === get().selectedAccountId &&
+          payload.data.mailboxPath === get().selectedMailboxPath
+        ) {
           window.api.messages.list(payload.data.accountId, payload.data.mailboxPath).then((msgs) => {
-            set((s) => ({ messagesByKey: { ...s.messagesByKey, [key(payload.data.accountId, payload.data.mailboxPath)]: msgs } }))
+            const k = key(payload.data.accountId, payload.data.mailboxPath)
+            set((s) => ({ messagesByKey: { ...s.messagesByKey, [k]: dropPending(msgs, s.pendingRemovals) } }))
           })
         }
       } else if (payload.type === 'mailbox-updated') {
@@ -321,7 +365,7 @@ export const useMailStore = create<MailState>((set, get) => ({
     if (!accountId) return
     set({ selectedMailboxPath: mailboxPath, selectedUid: null, searchResults: null, selectedUids: new Set() })
     const cached = await window.api.messages.list(accountId, mailboxPath)
-    set((s) => ({ messagesByKey: { ...s.messagesByKey, [key(accountId, mailboxPath)]: cached } }))
+    set((s) => ({ messagesByKey: { ...s.messagesByKey, [key(accountId, mailboxPath)]: dropPending(cached, s.pendingRemovals) } }))
     window.api.mail.sync(accountId, mailboxPath).catch(() => void 0)
   },
 
@@ -439,11 +483,17 @@ export const useMailStore = create<MailState>((set, get) => ({
 
     // Optimistic removal from the source list — rolled back below if the
     // server-side move actually fails, instead of just leaving the message
-    // looking vanished (it hadn't actually gone anywhere).
+    // looking vanished (it hadn't actually gone anywhere). Tracked in
+    // pendingRemovals too so a concurrent sync's own list refetch (which
+    // overwrites this same list from the DB) can't resurrect it before the
+    // move's own IMAP command — queued behind that sync on the same
+    // mailbox lock — has actually gone through.
+    const rKey = resultKey(moved)
     set((s) => ({
       messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).filter((m) => m.uid !== uid) },
       searchResults: withoutMessage(s.searchResults, mailboxPath, uid),
-      selectedUid: wasSelected ? null : s.selectedUid
+      selectedUid: wasSelected ? null : s.selectedUid,
+      pendingRemovals: new Set(s.pendingRemovals).add(rKey)
     }))
     if (!moved.flags.seen) {
       adjustUnreadCount(set, accountId, mailboxPath, -1)
@@ -452,17 +502,26 @@ export const useMailStore = create<MailState>((set, get) => ({
     try {
       await window.api.messages.move(accountId, mailboxPath, uid, destPath)
     } catch (err) {
-      set((s) => ({
-        messagesByKey: { ...s.messagesByKey, [k]: [...(s.messagesByKey[k] ?? []), moved] },
-        searchResults: wasInSearch ? [...(s.searchResults ?? []), moved] : s.searchResults,
-        selectedUid: wasSelected ? uid : s.selectedUid
-      }))
+      set((s) => {
+        const next = new Set(s.pendingRemovals)
+        next.delete(rKey)
+        return {
+          messagesByKey: { ...s.messagesByKey, [k]: [...(s.messagesByKey[k] ?? []), moved] },
+          searchResults: wasInSearch ? [...(s.searchResults ?? []), moved] : s.searchResults,
+          selectedUid: wasSelected ? uid : s.selectedUid,
+          pendingRemovals: next
+        }
+      })
       if (!moved.flags.seen) adjustUnreadCount(set, accountId, mailboxPath, 1)
       set({ statusNotice: `Couldn't move that message: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
 
-    set({ statusNotice: `Moved to ${destPath}` })
+    set((s) => {
+      const next = new Set(s.pendingRemovals)
+      next.delete(rKey)
+      return { pendingRemovals: next, statusNotice: `Moved to ${destPath}` }
+    })
 
     // The message gets a new UID in the destination mailbox, which we don't
     // know locally (IMAP MOVE/COPY doesn't hand it back in a form we parse
@@ -482,18 +541,40 @@ export const useMailStore = create<MailState>((set, get) => ({
       return
     }
     const k = key(accountId, mailboxPath)
+    const rKey = resultKey(removed)
 
     set((s) => ({
       messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).filter((m) => m.uid !== uid) },
       searchResults: withoutMessage(s.searchResults, mailboxPath, uid),
-      selectedUid: s.selectedUid === uid ? null : s.selectedUid
+      selectedUid: s.selectedUid === uid ? null : s.selectedUid,
+      pendingRemovals: new Set(s.pendingRemovals).add(rKey)
     }))
 
     if (!removed.flags.seen) {
       adjustUnreadCount(set, accountId, mailboxPath, -1)
     }
 
-    await window.api.messages.delete(accountId, mailboxPath, uid)
+    try {
+      await window.api.messages.delete(accountId, mailboxPath, uid)
+    } catch (err) {
+      set((s) => {
+        const next = new Set(s.pendingRemovals)
+        next.delete(rKey)
+        return {
+          messagesByKey: { ...s.messagesByKey, [k]: [...(s.messagesByKey[k] ?? []), removed] },
+          pendingRemovals: next
+        }
+      })
+      if (!removed.flags.seen) adjustUnreadCount(set, accountId, mailboxPath, 1)
+      set({ statusNotice: `Couldn't delete that message: ${err instanceof Error ? err.message : String(err)}` })
+      return
+    }
+
+    set((s) => {
+      const next = new Set(s.pendingRemovals)
+      next.delete(rKey)
+      return { pendingRemovals: next }
+    })
   },
 
   toggleMultiSelect(msg) {
@@ -612,19 +693,30 @@ export const useMailStore = create<MailState>((set, get) => ({
             const k = key(g.accountId, g.mailboxPath)
             nextMessagesByKey[k] = (nextMessagesByKey[k] ?? []).filter((m) => !removedKeys.has(resultKey(m)))
           }
+          const nextPending = new Set(s.pendingRemovals)
+          for (const rk of removedKeys) nextPending.add(rk)
           return {
             messagesByKey: nextMessagesByKey,
             searchResults: s.searchResults?.filter((m) => !removedKeys.has(resultKey(m))) ?? null,
             selectedUid: toPurge.some((m) => m.uid === s.selectedUid) ? null : s.selectedUid,
-            selectedUids: new Set<string>()
+            selectedUids: new Set<string>(),
+            pendingRemovals: nextPending
           }
         })
         for (const m of toPurge) {
           if (!m.flags.seen) adjustUnreadCount(set, m.accountId, m.mailboxPath, -1)
         }
-        await Promise.all(
-          [...groups.values()].map((g) => window.api.messages.bulkDelete(g.accountId, g.mailboxPath, g.uids))
-        )
+        try {
+          await Promise.all(
+            [...groups.values()].map((g) => window.api.messages.bulkDelete(g.accountId, g.mailboxPath, g.uids))
+          )
+        } finally {
+          set((s) => {
+            const nextPending = new Set(s.pendingRemovals)
+            for (const rk of removedKeys) nextPending.delete(rk)
+            return { pendingRemovals: nextPending }
+          })
+        }
       }
 
       set({ statusNotice: `Deleted ${selected.length} message${selected.length === 1 ? '' : 's'}` })
