@@ -347,6 +347,22 @@ export class ImapService {
 
   private async runMailboxSync(accountId: string, mailboxPath: string, sinceDaysOverride?: number): Promise<void> {
     const client = await this.getClient(accountId)
+
+    interface PendingMessage {
+      uid: number
+      summary: MessageSummary
+      snippetPartId: string | null
+    }
+    let pending: PendingMessage[] = []
+    let total = 0
+
+    // Phase 1 holds the mailbox lock for its own duration — it's one atomic
+    // FETCH command plus the reconciliation pass that depends on its
+    // results, neither of which can be meaningfully interrupted. Phase 2
+    // (below, outside this lock) is where a sync's duration actually
+    // balloons for a mailbox with a large backlog, so that's where it
+    // matters that something else — someone opening a message, say — isn't
+    // stuck waiting for the whole thing to finish.
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       const mailbox = client.mailbox as MailboxObject
@@ -363,7 +379,6 @@ export class ImapService {
       // below reflects how many messages this sync actually covers, not the
       // mailbox's full size.
       let range: string | number[]
-      let total: number
       let useUid: boolean
       // Scopes the deletion-reconciliation below: with a lookback window, a
       // cached message can legitimately be older than this sync's own
@@ -423,12 +438,6 @@ export class ImapService {
       // queue behind this still-open FETCH and deadlock forever (fetch is
       // waiting to be iterated further, download is waiting for fetch to
       // finish) with no error or timeout.
-      interface PendingMessage {
-        uid: number
-        summary: MessageSummary
-        snippetPartId: string | null
-      }
-      const pending: PendingMessage[] = []
       const seenUids = new Set<number>()
 
       for await (const msg of client.fetch(
@@ -459,7 +468,15 @@ export class ImapService {
           hasAttachments,
           snippet: existing?.snippet ?? ''
         }
-        if (!existing || !existing.snippet) {
+        // snippetPartId is null for a message with no text/plain or
+        // text/html part at all — common for automated mail that's really
+        // just an attachment (a DMARC aggregate report, say). There's
+        // nothing Phase 2 could ever fetch for one of these, so without
+        // this check it would requeue into `pending` on every single sync
+        // forever (its snippet can never stop being empty), inflating the
+        // "Downloading X of Y" count with messages nothing is actually
+        // being downloaded for.
+        if (snippetPartId && (!existing || !existing.snippet)) {
           pending.push({ uid: msg.uid, summary, snippetPartId })
         }
         upsertMessage(summary)
@@ -482,11 +499,22 @@ export class ImapService {
         }
       }
 
-      // Phase 2: the FETCH command is closed now, so it's safe to issue
-      // DOWNLOAD commands on the same connection to backfill snippets —
-      // only for messages that didn't already have one cached.
-      let fetched = 0
-      for (const item of pending) {
+    } finally {
+      lock.release()
+    }
+
+    // Phase 2: backfill snippets for whatever Phase 1 found uncached, one
+    // message at a time — each iteration takes its own, short-lived mailbox
+    // lock instead of the whole phase sharing one. The mailbox stays
+    // selected between them (ImapFlow's lock has a fast path for "already
+    // the right mailbox", no extra SELECT), so this costs nothing when
+    // nothing else wants the connection — but when something does (someone
+    // opening a message, say), it only has to wait for the current single
+    // download to finish, not for a backlog that can run to the thousands.
+    let fetched = 0
+    for (const item of pending) {
+      const itemLock = await client.getMailboxLock(mailboxPath)
+      try {
         if (item.snippetPartId) {
           try {
             const { content } = await client.download(String(item.uid), item.snippetPartId, {
@@ -506,14 +534,25 @@ export class ImapService {
             // Leave snippet blank; the message itself synced fine.
           }
         }
-        fetched += 1
-        this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched, total, done: false } })
+      } finally {
+        itemLock.release()
       }
+      fetched += 1
+      this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched, total, done: false } })
 
-      this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: pending.length, total, done: true } })
-    } finally {
-      lock.release()
+      // Without this, releasing one item's lock and immediately requesting
+      // the next one back-to-back in this same synchronous loop wins the
+      // race against an interactive request every time: ImapFlow grants a
+      // freed lock to the next *already-queued* waiter via setImmediate,
+      // but an interactive click's own getMailboxLock call still has an
+      // IPC hop to make first, and without yielding at least one full tick
+      // here, this loop had already re-queued itself before that request
+      // ever got the chance — so it waited out the entire rest of the
+      // backlog instead of just the one download in flight when it clicked.
+      await new Promise((resolve) => setTimeout(resolve, 150))
     }
+
+    this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: pending.length, total, done: true } })
   }
 
   // Local search (messageCache.searchMessages) only covers whatever's
