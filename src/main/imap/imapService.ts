@@ -373,23 +373,13 @@ export class ImapService {
       }
 
       const sinceDays = sinceDaysOverride ?? this.settingsStore.get().syncLookbackDays
-      // 0 means "All Mail": no date cutoff, fetch everything in the mailbox.
-      // Otherwise resolve the cutoff to a concrete UID set via SEARCH SINCE
-      // first (rather than handing the Date straight to fetch()) so `total`
-      // below reflects how many messages this sync actually covers, not the
-      // mailbox's full size.
-      let range: string | number[]
-      let useUid: boolean
-      // Scopes the deletion-reconciliation below: with a lookback window, a
-      // cached message can legitimately be older than this sync's own
-      // SEARCH SINCE cutoff (synced earlier under a longer-window setting,
-      // say) without actually having been deleted — only cached messages
-      // that fall *inside* the window this sync actually queried (by date,
-      // or because they were unread — see the unread SEARCH above) can be
-      // trusted to appear in the results if they still exist on the server.
-      // null means "All Mail": every cached message for this mailbox is in
-      // scope, since '1:*' below covers the whole thing.
+      // 0 means "All Mail": no date cutoff, every message in the mailbox is
+      // in scope. Either way this resolves to a concrete UID set via SEARCH
+      // first (rather than fetching a raw sequence range) so the sync can
+      // tell new/changed messages apart from ones it already has — see
+      // below.
       let cutoffDate: Date | null = null
+      let uids: number[]
       if (sinceDays > 0) {
         cutoffDate = new Date()
         cutoffDate.setDate(cutoffDate.getDate() - sinceDays)
@@ -403,19 +393,17 @@ export class ImapService {
           // unread but there's nothing there" bug this fixes.
           client.search({ seen: false }, { uid: true })
         ])
-        const uids = Array.from(new Set([...(withinWindow || []), ...(unread || [])]))
-        if (uids.length === 0) {
-          this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: 0, total: 0, done: true } })
-          return
-        }
-        range = uids
-        total = uids.length
-        useUid = true
+        uids = Array.from(new Set([...(withinWindow || []), ...(unread || [])]))
       } else {
-        range = '1:*'
-        total = totalInMailbox
-        useUid = false
+        uids = (await client.search({ all: true }, { uid: true })) || []
       }
+
+      if (uids.length === 0) {
+        this.emit({ type: 'sync-progress', data: { accountId, mailboxPath, fetched: 0, total: 0, done: true } })
+        return
+      }
+      total = uids.length
+      const searchSet = new Set(uids)
 
       // Only Inbox/Sent feed the compose autocomplete address book — other
       // folders (drafts, trash, mailing-list archives) would pollute it
@@ -423,77 +411,94 @@ export class ImapService {
       const specialUse = cachedListMailboxes(accountId).find((m) => m.path === mailboxPath)?.specialUse
       const indexContacts = specialUse === 'Inbox' || specialUse === 'Sent'
 
-      // A message's content (and so its snippet) never changes once fetched,
-      // only its flags do. Re-downloading every snippet on every sync/poll
-      // was both wasteful and, worse, visibly clobbered the cached preview
-      // text with '' for an instant before refilling it — the "list flashes
-      // blank then repopulates" bug. So: look up what's cached first, keep
-      // an existing snippet as-is, and only fetch one for messages that
-      // don't have one yet.
       const existingByUid = new Map(cachedListMessages(accountId, mailboxPath).map((m) => [m.uid, m]))
 
-      // Phase 1: drain the FETCH command fully before issuing any other
-      // command on this connection. ImapFlow serializes commands on a
-      // connection, so calling client.download() mid-iteration here would
-      // queue behind this still-open FETCH and deadlock forever (fetch is
-      // waiting to be iterated further, download is waiting for fetch to
-      // finish) with no error or timeout.
-      const seenUids = new Set<number>()
+      // A message's content — subject, from/to, snippet, attachments — never
+      // changes once it exists; only its flags can (read elsewhere,
+      // flagged, etc). So the only messages worth a full envelope +
+      // bodyStructure fetch are ones genuinely new to the cache (or newly
+      // back in scope, e.g. an old message just marked unread from
+      // elsewhere) — re-fetching that for this sync's *entire* scope every
+      // single time, even when nothing had changed, was the real cost
+      // behind "checking for mail" being so expensive.
+      const newUids = uids.filter((uid) => !existingByUid.has(uid))
+      const knownUids = uids.filter((uid) => existingByUid.has(uid))
 
-      for await (const msg of client.fetch(
-        range,
-        { envelope: true, flags: true, bodyStructure: true, uid: true },
-        { uid: useUid }
-      )) {
-        seenUids.add(msg.uid)
-        const { hasAttachments, snippetPartId } = analyzeBodyStructure(msg.bodyStructure as never)
-        const existing = existingByUid.get(msg.uid)
-        const summary: MessageSummary = {
-          accountId,
-          mailboxPath,
-          uid: msg.uid,
-          messageId: msg.envelope?.messageId || '',
-          subject: msg.envelope?.subject || '(no subject)',
-          from: toAddresses(msg.envelope?.from),
-          to: toAddresses(msg.envelope?.to),
-          cc: toAddresses(msg.envelope?.cc),
-          date: (msg.envelope?.date || new Date()).toISOString(),
-          flags: {
+      if (newUids.length > 0) {
+        for await (const msg of client.fetch(
+          newUids,
+          { envelope: true, flags: true, bodyStructure: true, uid: true },
+          { uid: true }
+        )) {
+          const { hasAttachments, snippetPartId } = analyzeBodyStructure(msg.bodyStructure as never)
+          const summary: MessageSummary = {
+            accountId,
+            mailboxPath,
+            uid: msg.uid,
+            messageId: msg.envelope?.messageId || '',
+            subject: msg.envelope?.subject || '(no subject)',
+            from: toAddresses(msg.envelope?.from),
+            to: toAddresses(msg.envelope?.to),
+            cc: toAddresses(msg.envelope?.cc),
+            date: (msg.envelope?.date || new Date()).toISOString(),
+            flags: {
+              seen: msg.flags?.has('\\Seen') ?? false,
+              flagged: msg.flags?.has('\\Flagged') ?? false,
+              answered: msg.flags?.has('\\Answered') ?? false,
+              draft: msg.flags?.has('\\Draft') ?? false,
+              deleted: msg.flags?.has('\\Deleted') ?? false
+            },
+            hasAttachments,
+            snippet: ''
+          }
+          // snippetPartId is null for a message with no text/plain or
+          // text/html part at all — common for automated mail that's really
+          // just an attachment (a DMARC aggregate report, say). There's
+          // nothing Phase 2 could ever fetch for one of these.
+          if (snippetPartId) pending.push({ uid: msg.uid, summary, snippetPartId })
+          upsertMessage(summary)
+          if (indexContacts) indexContactsFromMessage(summary)
+        }
+      }
+
+      // Already-cached messages can't have changed content, only flags —
+      // someone marking one read, flagged, etc. from webmail or another
+      // device. A FLAGS-only fetch is a small fraction of the size of a
+      // full envelope + bodyStructure one, and only rows whose flags
+      // actually differ from what's cached get written.
+      if (knownUids.length > 0) {
+        for await (const msg of client.fetch(knownUids, { flags: true, uid: true }, { uid: true })) {
+          const existing = existingByUid.get(msg.uid)
+          if (!existing) continue
+          const next = {
             seen: msg.flags?.has('\\Seen') ?? false,
             flagged: msg.flags?.has('\\Flagged') ?? false,
             answered: msg.flags?.has('\\Answered') ?? false,
             draft: msg.flags?.has('\\Draft') ?? false,
             deleted: msg.flags?.has('\\Deleted') ?? false
-          },
-          hasAttachments,
-          snippet: existing?.snippet ?? ''
+          }
+          const changed =
+            next.seen !== existing.flags.seen ||
+            next.flagged !== existing.flags.flagged ||
+            next.answered !== existing.flags.answered ||
+            next.draft !== existing.flags.draft ||
+            next.deleted !== existing.flags.deleted
+          if (changed) setMessageFlags(accountId, mailboxPath, msg.uid, next)
         }
-        // snippetPartId is null for a message with no text/plain or
-        // text/html part at all — common for automated mail that's really
-        // just an attachment (a DMARC aggregate report, say). There's
-        // nothing Phase 2 could ever fetch for one of these, so without
-        // this check it would requeue into `pending` on every single sync
-        // forever (its snippet can never stop being empty), inflating the
-        // "Downloading X of Y" count with messages nothing is actually
-        // being downloaded for.
-        if (snippetPartId && (!existing || !existing.snippet)) {
-          pending.push({ uid: msg.uid, summary, snippetPartId })
-        }
-        upsertMessage(summary)
-        if (indexContacts) indexContactsFromMessage(summary)
       }
 
       // A message deleted or moved elsewhere (another device, webmail,
-      // another client entirely) never shows up again in this FETCH —
-      // nothing fails, it's just silently absent — so without comparing
-      // against what's cached, deletion from elsewhere went undetected
-      // until the moment someone happened to open that exact message (see
-      // downloadAndParse's MESSAGE_GONE_CODE handling), which is exactly
-      // the "doesn't seem to work all the time" gap. Covers push-triggered
-      // and interval syncs too, since they all funnel through this method.
+      // another client entirely) simply stops appearing in this scope's
+      // SEARCH results — nothing fails, it's just silently absent — so
+      // without comparing against what's cached, deletion from elsewhere
+      // went undetected until the moment someone happened to open that
+      // exact message (see downloadAndParse's MESSAGE_GONE_CODE handling),
+      // which is exactly the "doesn't seem to work all the time" gap.
+      // Covers push-triggered and interval syncs too, since they all funnel
+      // through this method.
       for (const existing of existingByUid.values()) {
         if (cutoffDate && new Date(existing.date) < cutoffDate && existing.flags.seen) continue
-        if (!seenUids.has(existing.uid)) {
+        if (!searchSet.has(existing.uid)) {
           removeMessage(accountId, mailboxPath, existing.uid)
           this.emit({ type: 'message-removed', data: { accountId, mailboxPath, uid: existing.uid } })
         }
