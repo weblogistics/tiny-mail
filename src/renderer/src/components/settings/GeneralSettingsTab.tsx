@@ -74,8 +74,6 @@ export function GeneralSettingsTab(): JSX.Element {
             disabled={settings.syncMode !== 'interval'}
             onChange={(e) => update({ syncIntervalSeconds: Number(e.target.value) })}
           >
-            <option value={30}>30 seconds</option>
-            <option value={60}>1 minute</option>
             <option value={300}>5 minutes</option>
             <option value={900}>15 minutes</option>
             <option value={1800}>30 minutes</option>
