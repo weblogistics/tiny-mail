@@ -306,7 +306,43 @@ export class ImapService {
       this.syncing.delete(syncKey)
     })
     this.syncing.set(syncKey, run)
+    run.then(
+      () => {
+        // Fire-and-forget, after the sync's own mailbox lock is released
+        // (runMailboxSync's finally already ran by the time this promise
+        // settles) so prefetching interleaves fairly with anything else
+        // waiting on the same connection instead of extending the window
+        // where the mailbox looks "still syncing".
+        this.prefetchRecentBodies(accountId, mailboxPath).catch((err) =>
+          console.error('[imap] body prefetch failed', accountId, mailboxPath, err)
+        )
+      },
+      () => void 0 // sync itself failed — nothing to prefetch from a run that didn't complete
+    )
     return run
+  }
+
+  // Downloads and caches bodies for the most recently dated messages in a
+  // mailbox that don't have one cached yet, so opening one of them feels
+  // instant instead of paying a real IMAP round trip (or two, for a message
+  // with inline images) at the moment the user actually clicks it. Runs
+  // after every sync of a mailbox — cheap on repeat runs, since
+  // getMessageBody's own on-disk cache check makes an already-prefetched
+  // message an immediate no-op rather than a real fetch.
+  private async prefetchRecentBodies(accountId: string, mailboxPath: string, limit = 30): Promise<void> {
+    const recent = cachedListMessages(accountId, mailboxPath)
+      .slice()
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .slice(0, limit)
+
+    for (const m of recent) {
+      try {
+        await this.getMessageBody(accountId, mailboxPath, m.uid)
+      } catch {
+        // A message that vanished, or any other one-off fetch failure,
+        // shouldn't stop the rest of the batch from prefetching.
+      }
+    }
   }
 
   private async runMailboxSync(accountId: string, mailboxPath: string, sinceDaysOverride?: number): Promise<void> {
