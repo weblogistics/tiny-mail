@@ -2,7 +2,8 @@ import type { MessageSummary } from '@shared/types'
 
 export interface MessageThread {
   key: string
-  // Oldest first, matching how an expanded conversation reads top-to-bottom.
+  // Oldest first by default (see groupMessagesByThread's newestFirst param),
+  // matching how an expanded conversation reads top-to-bottom.
   messages: MessageSummary[]
 }
 
@@ -21,7 +22,12 @@ export function normalizeThreadSubject(subject: string): string {
   return s.toLowerCase()
 }
 
-export function groupMessagesByThread(messages: MessageSummary[]): MessageThread[] {
+// newestFirst matches a thread's internal message order to the same
+// direction as the overall list's "Newest First"/"Oldest First" sort —
+// without it, an expanded thread always read oldest-first even while the
+// list around it read newest-first, which looked like the two disagreed
+// with each other.
+export function groupMessagesByThread(messages: MessageSummary[], newestFirst = false): MessageThread[] {
   const order: string[] = []
   const byKey = new Map<string, MessageSummary[]>()
 
@@ -41,6 +47,8 @@ export function groupMessagesByThread(messages: MessageSummary[]): MessageThread
 
   return order.map((key) => ({
     key,
-    messages: [...byKey.get(key)!].sort((a, b) => a.date.localeCompare(b.date))
+    messages: [...byKey.get(key)!].sort((a, b) =>
+      newestFirst ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)
+    )
   }))
 }

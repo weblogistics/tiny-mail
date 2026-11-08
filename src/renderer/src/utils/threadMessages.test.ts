@@ -61,6 +61,17 @@ describe('groupMessagesByThread', () => {
     expect(threads[0].messages.map((m) => m.uid)).toEqual([1, 2])
   })
 
+  it('orders messages within a thread newest first when asked to', () => {
+    const threads = groupMessagesByThread(
+      [
+        msg({ uid: 1, subject: 'X', date: '2026-01-01T00:00:00.000Z' }),
+        msg({ uid: 2, subject: 'Re: X', date: '2026-02-01T00:00:00.000Z' })
+      ],
+      true
+    )
+    expect(threads[0].messages.map((m) => m.uid)).toEqual([2, 1])
+  })
+
   it('does not merge multiple blank-subject messages into one thread', () => {
     const threads = groupMessagesByThread([msg({ uid: 1, subject: '' }), msg({ uid: 2, subject: '' })])
     expect(threads).toHaveLength(2)

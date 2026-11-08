@@ -77,7 +77,7 @@ export function MessageList(): JSX.Element {
         .sort(comparator)
         .map((msg) => ({ kind: 'message' as const, msg }))
     }
-    const threads = groupMessagesByThread(filtered)
+    const threads = groupMessagesByThread(filtered, sort === 'date-desc')
     return threads
       .slice()
       .sort((a, b) => comparator(a.messages[a.messages.length - 1], b.messages[b.messages.length - 1]))
