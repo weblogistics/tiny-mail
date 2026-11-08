@@ -162,20 +162,18 @@ export class ImapService {
   private triggerResync(accountId: string, mailboxPath: string): void {
     const key = `${accountId}::${mailboxPath}`
     if (this.syncing.has(key)) {
+      // Already syncing (from this notification or anything else) — that
+      // in-flight pass may have already read past the UID that just
+      // arrived, so piggybacking on it isn't enough; queue exactly one
+      // fresh follow-up run for once it finishes instead.
       this.pendingResync.add(key)
       return
     }
-    const run = async (): Promise<void> => {
-      try {
-        await this.syncMailbox(accountId, mailboxPath)
-      } catch (err) {
-        console.error('[imap] push-triggered resync failed', accountId, mailboxPath, err)
-      } finally {
-        this.syncing.delete(key)
+    this.syncMailbox(accountId, mailboxPath)
+      .catch((err) => console.error('[imap] push-triggered resync failed', accountId, mailboxPath, err))
+      .finally(() => {
         if (this.pendingResync.delete(key)) this.triggerResync(accountId, mailboxPath)
-      }
-    }
-    this.syncing.set(key, run())
+      })
   }
 
   private async getClient(accountId: string): Promise<ImapFlow> {
@@ -283,7 +281,35 @@ export class ImapService {
   // sync" setting (settingsStore.syncLookbackDays); normal syncs always read
   // the live setting instead, so changing it takes effect on the very next
   // sync without an app restart.
+  //
+  // Several independent things can all ask to sync the same mailbox around
+  // the same time — the renderer's periodic poll timer, selecting the
+  // mailbox, the "Get Mail" button, and IMAP's own push notification (see
+  // triggerResync) — and a sync's own duration isn't bounded: a mailbox
+  // with a large backlog (a first-ever sync, or one that just grew a lot,
+  // e.g. after the "always include unread regardless of age" fix made
+  // Phase 1 cover far more UIDs for an account with thousands of old
+  // unread messages) can easily take longer than the poll interval. Without
+  // this guard, each of those triggers started its own full pass
+  // independently, so a slow mailbox accumulated an ever-growing pile of
+  // overlapping redundant syncs — each repeating the same SEARCH and
+  // re-upserting the same rows — which is exactly what sustained high CPU
+  // usage with no visible progress looks like. Now a request made while
+  // this mailbox is already syncing just piggybacks on that same in-flight
+  // run instead of starting a second one.
   async syncMailbox(accountId: string, mailboxPath: string, sinceDaysOverride?: number): Promise<void> {
+    const syncKey = `${accountId}::${mailboxPath}`
+    const inFlight = this.syncing.get(syncKey)
+    if (inFlight) return inFlight
+
+    const run = this.runMailboxSync(accountId, mailboxPath, sinceDaysOverride).finally(() => {
+      this.syncing.delete(syncKey)
+    })
+    this.syncing.set(syncKey, run)
+    return run
+  }
+
+  private async runMailboxSync(accountId: string, mailboxPath: string, sinceDaysOverride?: number): Promise<void> {
     const client = await this.getClient(accountId)
     const lock = await client.getMailboxLock(mailboxPath)
     try {
