@@ -122,19 +122,26 @@ export function RichTextToolbar({ targetRef }: RichTextToolbarProps): JSX.Elemen
 
   return (
     <div className={styles.toolbar}>
-      <button className={cls(active.bold)} title="Bold" onMouseDown={run('bold')}>
+      {/* tabIndex={-1} on every button here: this toolbar sits between the
+          Subject field and the compose body in DOM order, so without it
+          Tab from Subject would stop at each formatting button in turn
+          instead of going straight to the body, where someone starting a
+          new message almost always wants to land next. Still fully
+          clickable with the mouse either way. */}
+      <button className={cls(active.bold)} title="Bold" tabIndex={-1} onMouseDown={run('bold')}>
         <b>B</b>
       </button>
-      <button className={cls(active.italic)} title="Italic" onMouseDown={run('italic')}>
+      <button className={cls(active.italic)} title="Italic" tabIndex={-1} onMouseDown={run('italic')}>
         <i>I</i>
       </button>
-      <button className={cls(active.underline)} title="Underline" onMouseDown={run('underline')}>
+      <button className={cls(active.underline)} title="Underline" tabIndex={-1} onMouseDown={run('underline')}>
         <u>U</u>
       </button>
       <div className={styles.separator} />
       <button
         className={cls(active.insertUnorderedList)}
         title="Bulleted List"
+        tabIndex={-1}
         onMouseDown={run('insertUnorderedList')}
       >
         <IconBulletList width={15} height={15} />
@@ -142,18 +149,19 @@ export function RichTextToolbar({ targetRef }: RichTextToolbarProps): JSX.Elemen
       <button
         className={cls(active.insertOrderedList)}
         title="Numbered List"
+        tabIndex={-1}
         onMouseDown={run('insertOrderedList')}
       >
         <IconNumberedList width={15} height={15} />
       </button>
       <div className={styles.separator} />
-      <button className={styles.btn} title="Link" onMouseDown={runLink}>
+      <button className={styles.btn} title="Link" tabIndex={-1} onMouseDown={runLink}>
         <IconLink width={15} height={15} />
       </button>
-      <button className={styles.btn} title="Insert Image" onMouseDown={runInsertImage}>
+      <button className={styles.btn} title="Insert Image" tabIndex={-1} onMouseDown={runInsertImage}>
         <IconImage width={15} height={15} />
       </button>
-      <button className={styles.btn} title="Remove Formatting" onMouseDown={run('removeFormat')}>
+      <button className={styles.btn} title="Remove Formatting" tabIndex={-1} onMouseDown={run('removeFormat')}>
         <IconClearFormat width={15} height={15} />
       </button>
       <input

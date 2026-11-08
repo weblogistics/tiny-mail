@@ -170,6 +170,7 @@ export function ComposeStandalone(): JSX.Element | null {
               <span className={styles.attachmentSize}>{formatBytes(a.size)}</span>
               <button
                 className={styles.attachmentRemove}
+                tabIndex={-1}
                 onClick={() => removeAttachment(i)}
                 aria-label={`Remove ${a.filename}`}
               >
