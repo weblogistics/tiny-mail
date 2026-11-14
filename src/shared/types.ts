@@ -191,6 +191,22 @@ export interface SyncProgress {
   done: boolean
 }
 
+// requestId ties these back to the search call that's still awaiting its
+// final result (there can be at most one live server search per account,
+// but a fast retype can leave a stale one's events arriving after a newer
+// one started) — the renderer compares it against whatever it's currently
+// waiting on and drops anything that doesn't match.
+export interface SearchProgress {
+  accountId: string
+  requestId: string
+  // Cumulative matches found so far across every mailbox scanned so far,
+  // not just the most recently finished one, so a consumer can just replace
+  // its working set rather than merge deltas.
+  results: MessageSummary[]
+  mailboxPath: string
+  done: boolean
+}
+
 // 'interval' polls on a timer (syncIntervalSeconds); 'push' relies on the
 // IMAP server notifying the open connection as new mail arrives (IDLE),
 // skipping the timer entirely. Push only covers whichever mailbox is
@@ -215,6 +231,7 @@ export interface AppSettings {
 
 export type MailEventPayload =
   | { type: 'sync-progress'; data: SyncProgress }
+  | { type: 'search-progress'; data: SearchProgress }
   | { type: 'mailbox-updated'; data: MailboxSummary }
   | { type: 'new-message'; data: MessageSummary }
   | { type: 'message-removed'; data: { accountId: string; mailboxPath: string; uid: number } }

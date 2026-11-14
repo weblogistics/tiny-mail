@@ -126,6 +126,14 @@ function inferSpecialUseFromName(name: string): SpecialUse {
 
 export class ImapService {
   private clients = new Map<string, ImapFlow>()
+  // searchServer() runs long (12-30s budget, sometimes longer with slow
+  // body search) and holds a mailbox lock for most of that time. Routing it
+  // through the same connection as everything else — body fetches, flag
+  // changes, sync — meant opening a message while a search was still
+  // running had to queue behind it on the wire, since ImapFlow serializes
+  // commands per connection. A dedicated connection per account for search
+  // keeps it off that queue entirely.
+  private searchClients = new Map<string, ImapFlow>()
   // Guards against piling up overlapping syncMailbox() calls when the
   // server's 'exists' push notification (new mail arriving) fires again
   // before a previous resync has finished — queues at most one follow-up
@@ -176,17 +184,26 @@ export class ImapService {
       })
   }
 
-  private async getClient(accountId: string): Promise<ImapFlow> {
-    const existing = this.clients.get(accountId)
+  // pool 'search' gets its own connection (see searchClients above) so a
+  // long-running search never queues behind — or blocks — ordinary
+  // operations on the main connection, and vice versa. It skips the
+  // account-status events and push-notification wiring that the main
+  // connection drives, since those describe the account as a whole and a
+  // search connection coming or going shouldn't move that indicator.
+  private async getClient(accountId: string, pool: 'main' | 'search' = 'main'): Promise<ImapFlow> {
+    const clients = pool === 'main' ? this.clients : this.searchClients
+    const existing = clients.get(accountId)
     if (existing && existing.usable) {
-      // Re-asserts 'online' on every reuse, not just the original connect —
-      // belt-and-braces against the status bar getting stuck on a stale
-      // 'error' from an earlier transient blip that ImapFlow itself
-      // recovered from (the connection is usable right now, by definition,
-      // so whatever set 'error' no longer reflects reality). Cheap: this
-      // runs on every IMAP operation, but setting state to its own value is
-      // a no-op in the renderer.
-      this.emit({ type: 'account-status', data: { accountId, status: 'online' } })
+      if (pool === 'main') {
+        // Re-asserts 'online' on every reuse, not just the original connect
+        // — belt-and-braces against the status bar getting stuck on a stale
+        // 'error' from an earlier transient blip that ImapFlow itself
+        // recovered from (the connection is usable right now, by
+        // definition, so whatever set 'error' no longer reflects reality).
+        // Cheap: this runs on every IMAP operation, but setting state to
+        // its own value is a no-op in the renderer.
+        this.emit({ type: 'account-status', data: { accountId, status: 'online' } })
+      }
       return existing
     }
 
@@ -194,7 +211,7 @@ export class ImapService {
     if (!account) throw new Error(`Unknown account: ${accountId}`)
     const password = this.accountStore.getPassword(accountId)
 
-    this.emit({ type: 'account-status', data: { accountId, status: 'connecting' } })
+    if (pool === 'main') this.emit({ type: 'account-status', data: { accountId, status: 'connecting' } })
 
     const client = new ImapFlow({
       host: account.imapHost,
@@ -207,23 +224,33 @@ export class ImapService {
       connectionTimeout: 15000
     })
 
-    client.on('error', (err: Error) => {
-      this.emit({ type: 'account-status', data: { accountId, status: 'error', error: err.message } })
-    })
+    if (pool === 'main') {
+      client.on('error', (err: Error) => {
+        this.emit({ type: 'account-status', data: { accountId, status: 'error', error: err.message } })
+      })
+    } else {
+      client.on('error', (err: Error) => {
+        console.error('[imap] search connection error', accountId, err)
+      })
+    }
 
     try {
       await client.connect()
     } catch (err) {
-      this.emit({
-        type: 'account-status',
-        data: { accountId, status: 'error', error: err instanceof Error ? err.message : String(err) }
-      })
+      if (pool === 'main') {
+        this.emit({
+          type: 'account-status',
+          data: { accountId, status: 'error', error: err instanceof Error ? err.message : String(err) }
+        })
+      }
       throw err
     }
 
-    this.emit({ type: 'account-status', data: { accountId, status: 'online' } })
-    this.clients.set(accountId, client)
-    this.watchForNewMail(accountId, client)
+    clients.set(accountId, client)
+    if (pool === 'main') {
+      this.emit({ type: 'account-status', data: { accountId, status: 'online' } })
+      this.watchForNewMail(accountId, client)
+    }
     return client
   }
 
@@ -577,7 +604,12 @@ export class ImapService {
   // budget bounds the worst case regardless of folder count, spending it on
   // the folders most likely to matter if it runs out before reaching them
   // all.
-  async searchServer(accountId: string, query: string, options: SearchOptions): Promise<MessageSummary[]> {
+  async searchServer(
+    accountId: string,
+    query: string,
+    options: SearchOptions,
+    requestId: string
+  ): Promise<MessageSummary[]> {
     const trimmed = query.trim()
     if (!trimmed) return []
 
@@ -594,7 +626,7 @@ export class ImapService {
       ...(since ? { since } : {})
     }
 
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'search')
     let mailboxes = cachedListMailboxes(accountId).filter((m) => !m.flags.includes('\\Noselect'))
     if (options.mailboxPath) {
       mailboxes = mailboxes.filter((m) => m.path === options.mailboxPath)
@@ -663,9 +695,23 @@ export class ImapService {
       } catch (err) {
         console.error('[imap] server search failed for mailbox', mb.path, err)
       }
+
+      // Lets the renderer paint matches as they're found instead of
+      // waiting out the whole multi-folder scan — each tick carries
+      // everything found so far, not just this folder's share of it, so a
+      // listener can treat it as the current working set rather than a
+      // delta to merge.
+      results.sort((a, b) => (a.date < b.date ? 1 : -1))
+      this.emit({
+        type: 'search-progress',
+        data: { accountId, requestId, results: [...results], mailboxPath: mb.path, done: false }
+      })
     }
 
-    results.sort((a, b) => (a.date < b.date ? 1 : -1))
+    this.emit({
+      type: 'search-progress',
+      data: { accountId, requestId, results: [...results], mailboxPath: '', done: true }
+    })
     return results
   }
 

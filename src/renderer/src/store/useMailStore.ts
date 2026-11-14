@@ -84,6 +84,25 @@ function groupByMailbox(
 let serverSearchTimer: ReturnType<typeof setTimeout> | null = null
 let serverSearchToken = 0
 
+// Combines whatever's already showing (local matches, plus anything the
+// server search has turned up on earlier ticks) with a fresh batch from the
+// server — used both as each search-progress event streams in and on the
+// final response, so a message already added by an earlier tick is just a
+// no-op the second time rather than a duplicate row.
+function mergeServerResults(existing: MessageSummary[] | null, serverResults: MessageSummary[]): MessageSummary[] {
+  const seen = new Set((existing ?? []).map(resultKey))
+  const merged = [...(existing ?? [])]
+  for (const m of serverResults) {
+    const k = resultKey(m)
+    if (!seen.has(k)) {
+      seen.add(k)
+      merged.push(m)
+    }
+  }
+  merged.sort((a, b) => (a.date < b.date ? 1 : -1))
+  return merged
+}
+
 type SetFn = (
   partial: Partial<MailState> | ((state: MailState) => Partial<MailState>)
 ) => void
@@ -260,7 +279,14 @@ export const useMailStore = create<MailState>((set, get) => ({
 
   async init() {
     window.api.events.subscribe((payload) => {
-      if (payload.type === 'sync-progress') {
+      if (payload.type === 'search-progress') {
+        // A later keystroke bumps serverSearchToken and starts a new
+        // request before an older one's events have all arrived — drop
+        // anything that isn't from the search still being awaited.
+        if (payload.data.requestId !== String(serverSearchToken)) return
+        if (payload.data.accountId !== get().selectedAccountId) return
+        set((s) => ({ searchResults: mergeServerResults(s.searchResults, payload.data.results) }))
+      } else if (payload.type === 'sync-progress') {
         set((s) => ({ syncStatus: { ...s.syncStatus, [key(payload.data.accountId, payload.data.mailboxPath)]: payload.data } }))
         // Only refetch the list once a sync actually finishes, not on every
         // intermediate tick (there's one per message during the snippet
@@ -754,23 +780,16 @@ export const useMailStore = create<MailState>((set, get) => ({
     serverSearchTimer = setTimeout(async () => {
       set({ isSearchingServer: true })
       try {
-        const serverResults = await window.api.messages.searchServer(accountId, trimmed, options)
+        // Matches are also streamed in as 'search-progress' events (handled
+        // in init()) as each mailbox is scanned, so the list fills in live
+        // rather than sitting empty for however long the full scan takes —
+        // this await is just for the final batch and to know when to clear
+        // isSearchingServer.
+        const serverResults = await window.api.messages.searchServer(accountId, trimmed, options, String(myToken))
         // The query may have changed (or search may have been cleared)
         // while this round trip was in flight — drop stale results.
         if (myToken !== serverSearchToken) return
-        set((s) => {
-          const seen = new Set((s.searchResults ?? []).map(resultKey))
-          const merged = [...(s.searchResults ?? [])]
-          for (const m of serverResults) {
-            const k = resultKey(m)
-            if (!seen.has(k)) {
-              seen.add(k)
-              merged.push(m)
-            }
-          }
-          merged.sort((a, b) => (a.date < b.date ? 1 : -1))
-          return { searchResults: merged }
-        })
+        set((s) => ({ searchResults: mergeServerResults(s.searchResults, serverResults) }))
       } finally {
         if (myToken === serverSearchToken) set({ isSearchingServer: false })
       }

@@ -136,8 +136,14 @@ export function registerIpcHandlers(
 
   ipcMain.handle(
     IpcChannels.MessagesSearchServer,
-    async (_e, accountId: string, query: string, options: SearchOptions): Promise<MessageSummary[]> => {
-      return imapService.searchServer(accountId, query, options)
+    async (
+      _e,
+      accountId: string,
+      query: string,
+      options: SearchOptions,
+      requestId: string
+    ): Promise<MessageSummary[]> => {
+      return imapService.searchServer(accountId, query, options, requestId)
     }
   )
 
