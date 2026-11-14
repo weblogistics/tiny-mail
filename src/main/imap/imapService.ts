@@ -17,6 +17,7 @@ import {
 import { analyzeBodyStructure, extractBodyParts } from './bodyStructure'
 import { resolveInlineImages, type InlineImage } from './inlineImageResolver'
 import { indexContactsFromMessage } from '../db/contactsStore'
+import { sortByDateDesc } from '@shared/sortMessages'
 import type {
   ConnectionSecurity,
   MailboxSummary,
@@ -134,6 +135,11 @@ export class ImapService {
   // commands per connection. A dedicated connection per account for search
   // keeps it off that queue entirely.
   private searchClients = new Map<string, ImapFlow>()
+  // The requestId of the most recently started searchServer() call per
+  // account — lets an older, still-running search notice a newer one has
+  // superseded it (see searchServer) and stop early instead of continuing
+  // to hold the shared search connection's mailbox lock against it.
+  private latestSearchRequest = new Map<string, string>()
   // Guards against piling up overlapping syncMailbox() calls when the
   // server's 'exists' push notification (new mail arriving) fires again
   // before a previous resync has finished — queues at most one follow-up
@@ -357,10 +363,7 @@ export class ImapService {
   // getMessageBody's own on-disk cache check makes an already-prefetched
   // message an immediate no-op rather than a real fetch.
   private async prefetchRecentBodies(accountId: string, mailboxPath: string, limit = 30): Promise<void> {
-    const recent = cachedListMessages(accountId, mailboxPath)
-      .slice()
-      .sort((a, b) => (a.date < b.date ? 1 : -1))
-      .slice(0, limit)
+    const recent = sortByDateDesc(cachedListMessages(accountId, mailboxPath).slice()).slice(0, limit)
 
     for (const m of recent) {
       try {
@@ -626,6 +629,11 @@ export class ImapService {
       ...(since ? { since } : {})
     }
 
+    // Marks this call as the latest for the account so an older, still-
+    // running call (checked in the loop below) notices and backs off, and
+    // so this call's own cleanup (in the finally below) knows whether it's
+    // still the latest by the time it finishes — see latestSearchRequest.
+    this.latestSearchRequest.set(accountId, requestId)
     const client = await this.getClient(accountId, 'search')
     let mailboxes = cachedListMailboxes(accountId).filter((m) => !m.flags.includes('\\Noselect'))
     if (options.mailboxPath) {
@@ -639,79 +647,100 @@ export class ImapService {
     const TIME_BUDGET_MS = options.mailboxPath ? 30000 : 12000
     const deadline = Date.now() + TIME_BUDGET_MS
     const results: MessageSummary[] = []
-
-    for (const mb of mailboxes) {
-      if (results.length >= MAX_RESULTS) break
-      if (Date.now() >= deadline) break
-      try {
-        const lock = await client.getMailboxLock(mb.path)
-        try {
-          const uids = await client.search(searchQuery, { uid: true })
-          if (!uids || !uids.length) continue
-
-          // IMAP SEARCH returns UIDs in ascending order, which tracks with
-          // arrival order per mailbox — taking the tail biases the cap
-          // towards the most recently received matches rather than the
-          // oldest ones.
-          const remaining = MAX_RESULTS - results.length
-          const slice = uids.slice(-remaining)
-          const indexContacts = mb.specialUse === 'Inbox' || mb.specialUse === 'Sent'
-          const existingByUid = new Map(cachedListMessages(accountId, mb.path).map((m) => [m.uid, m]))
-
-          for await (const msg of client.fetch(
-            slice,
-            { envelope: true, flags: true, bodyStructure: true, uid: true },
-            { uid: true }
-          )) {
-            const { hasAttachments } = analyzeBodyStructure(msg.bodyStructure as never)
-            const existing = existingByUid.get(msg.uid)
-            const summary: MessageSummary = {
-              accountId,
-              mailboxPath: mb.path,
-              uid: msg.uid,
-              messageId: msg.envelope?.messageId || '',
-              subject: msg.envelope?.subject || '(no subject)',
-              from: toAddresses(msg.envelope?.from),
-              to: toAddresses(msg.envelope?.to),
-              cc: toAddresses(msg.envelope?.cc),
-              date: (msg.envelope?.date || new Date()).toISOString(),
-              flags: {
-                seen: msg.flags?.has('\\Seen') ?? false,
-                flagged: msg.flags?.has('\\Flagged') ?? false,
-                answered: msg.flags?.has('\\Answered') ?? false,
-                draft: msg.flags?.has('\\Draft') ?? false,
-                deleted: msg.flags?.has('\\Deleted') ?? false
-              },
-              hasAttachments,
-              snippet: existing?.snippet ?? ''
-            }
-            upsertMessage(summary)
-            if (indexContacts) indexContactsFromMessage(summary)
-            if (!options.hasAttachment || hasAttachments) results.push(summary)
-          }
-        } finally {
-          lock.release()
-        }
-      } catch (err) {
-        console.error('[imap] server search failed for mailbox', mb.path, err)
-      }
-
-      // Lets the renderer paint matches as they're found instead of
-      // waiting out the whole multi-folder scan — each tick carries
-      // everything found so far, not just this folder's share of it, so a
-      // listener can treat it as the current working set rather than a
-      // delta to merge.
-      results.sort((a, b) => (a.date < b.date ? 1 : -1))
-      this.emit({
-        type: 'search-progress',
-        data: { accountId, requestId, results: [...results], mailboxPath: mb.path, done: false }
-      })
+    const emitProgress = (mailboxPath: string, done: boolean): void => {
+      sortByDateDesc(results)
+      this.emit({ type: 'search-progress', data: { accountId, requestId, results: [...results], mailboxPath, done } })
     }
 
-    this.emit({
-      type: 'search-progress',
-      data: { accountId, requestId, results: [...results], mailboxPath: '', done: true }
-    })
+    try {
+      for (const mb of mailboxes) {
+        if (results.length >= MAX_RESULTS) break
+        if (Date.now() >= deadline) break
+        // A newer search for this account has started since this loop began
+        // — stop holding the shared connection's mailbox lock against it
+        // rather than running out the rest of this (now pointless) scan.
+        if (this.latestSearchRequest.get(accountId) !== requestId) break
+
+        const before = results.length
+        try {
+          const lock = await client.getMailboxLock(mb.path)
+          try {
+            const uids = await client.search(searchQuery, { uid: true })
+            if (uids && uids.length) {
+              // IMAP SEARCH returns UIDs in ascending order, which tracks
+              // with arrival order per mailbox — taking the tail biases the
+              // cap towards the most recently received matches rather than
+              // the oldest ones.
+              const remaining = MAX_RESULTS - results.length
+              const slice = uids.slice(-remaining)
+              const indexContacts = mb.specialUse === 'Inbox' || mb.specialUse === 'Sent'
+              const existingByUid = new Map(cachedListMessages(accountId, mb.path).map((m) => [m.uid, m]))
+
+              for await (const msg of client.fetch(
+                slice,
+                { envelope: true, flags: true, bodyStructure: true, uid: true },
+                { uid: true }
+              )) {
+                const { hasAttachments } = analyzeBodyStructure(msg.bodyStructure as never)
+                const existing = existingByUid.get(msg.uid)
+                const summary: MessageSummary = {
+                  accountId,
+                  mailboxPath: mb.path,
+                  uid: msg.uid,
+                  messageId: msg.envelope?.messageId || '',
+                  subject: msg.envelope?.subject || '(no subject)',
+                  from: toAddresses(msg.envelope?.from),
+                  to: toAddresses(msg.envelope?.to),
+                  cc: toAddresses(msg.envelope?.cc),
+                  date: (msg.envelope?.date || new Date()).toISOString(),
+                  flags: {
+                    seen: msg.flags?.has('\\Seen') ?? false,
+                    flagged: msg.flags?.has('\\Flagged') ?? false,
+                    answered: msg.flags?.has('\\Answered') ?? false,
+                    draft: msg.flags?.has('\\Draft') ?? false,
+                    deleted: msg.flags?.has('\\Deleted') ?? false
+                  },
+                  hasAttachments,
+                  snippet: existing?.snippet ?? ''
+                }
+                upsertMessage(summary)
+                if (indexContacts) indexContactsFromMessage(summary)
+                if (!options.hasAttachment || hasAttachments) results.push(summary)
+              }
+            }
+          } finally {
+            lock.release()
+          }
+        } catch (err) {
+          console.error('[imap] server search failed for mailbox', mb.path, err)
+        }
+
+        // Only worth a tick (sorting and copying the accumulated list, and
+        // an IPC round trip) when this folder actually added something —
+        // skipping it here for "nothing new" keeps that case and the
+        // thrown-error case consistent, instead of only the latter
+        // reaching the renderer.
+        if (results.length !== before) emitProgress(mb.path, false)
+      }
+    } finally {
+      // Only close the connection if nothing newer has claimed it in the
+      // meantime — otherwise it's still in use (or about to be) by
+      // whichever search is now latest, which skips this close itself.
+      if (this.latestSearchRequest.get(accountId) === requestId) {
+        this.latestSearchRequest.delete(accountId)
+        const toClose = this.searchClients.get(accountId)
+        if (toClose === client) {
+          this.searchClients.delete(accountId)
+          try {
+            await client.logout()
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+
+    emitProgress('', true)
     return results
   }
 
@@ -1086,7 +1115,7 @@ export class ImapService {
   }
 
   async disconnectAll(): Promise<void> {
-    for (const client of this.clients.values()) {
+    for (const client of [...this.clients.values(), ...this.searchClients.values()]) {
       try {
         await client.logout()
       } catch {
@@ -1094,5 +1123,6 @@ export class ImapService {
       }
     }
     this.clients.clear()
+    this.searchClients.clear()
   }
 }

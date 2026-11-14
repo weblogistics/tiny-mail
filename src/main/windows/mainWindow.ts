@@ -35,8 +35,27 @@ export function createMainWindow(): BrowserWindow {
   // everything from the main process's own state, so nothing is lost
   // beyond whatever was mid-edit in a compose window (unaffected — it's a
   // separate BrowserWindow).
+  const recentCrashes: number[] = []
+  const MAX_CRASHES = 3
+  const CRASH_WINDOW_MS = 30000
   win.webContents.on('render-process-gone', (_event, details) => {
+    // 'clean-exit' is a normal, intentional process exit (e.g. during app
+    // shutdown) rather than a crash — reloading in response to it would
+    // just fight whatever is already tearing the window down.
+    if (details.reason === 'clean-exit') return
+    if (win.isDestroyed()) return
+
     console.error('[main] renderer process gone, reloading', details)
+    const now = Date.now()
+    while (recentCrashes.length && now - recentCrashes[0] > CRASH_WINDOW_MS) recentCrashes.shift()
+    recentCrashes.push(now)
+    if (recentCrashes.length > MAX_CRASHES) {
+      // Reloading itself keeps triggering the crash (e.g. a GPU driver
+      // fault on every launch) — stop digging and leave the blank window
+      // rather than spinning a reload loop that pins the CPU.
+      console.error('[main] renderer keeps crashing, giving up on auto-reload')
+      return
+    }
     win.webContents.reload()
   })
 

@@ -12,6 +12,7 @@ import type {
   SyncProgress
 } from '@shared/types'
 import { resolveMailboxRole } from '@shared/resolveMailboxRole'
+import { sortByDateDesc } from '@shared/sortMessages'
 
 function key(accountId: string, mailboxPath: string): string {
   return `${accountId}::${mailboxPath}`
@@ -84,6 +85,16 @@ function groupByMailbox(
 let serverSearchTimer: ReturnType<typeof setTimeout> | null = null
 let serverSearchToken = 0
 
+// Bumping the token (without it, a server search already in flight for the
+// account/mailbox being navigated away from can still resolve later and
+// merge its results into whatever's now selected) is required everywhere
+// searchResults gets reset out from under a pending search, not just from
+// clearSearch() itself — selectAccount/selectMailbox do the same reset.
+function cancelPendingServerSearch(): void {
+  if (serverSearchTimer) clearTimeout(serverSearchTimer)
+  serverSearchToken++
+}
+
 // Combines whatever's already showing (local matches, plus anything the
 // server search has turned up on earlier ticks) with a fresh batch from the
 // server — used both as each search-progress event streams in and on the
@@ -99,8 +110,7 @@ function mergeServerResults(existing: MessageSummary[] | null, serverResults: Me
       merged.push(m)
     }
   }
-  merged.sort((a, b) => (a.date < b.date ? 1 : -1))
-  return merged
+  return sortByDateDesc(merged)
 }
 
 type SetFn = (
@@ -368,6 +378,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   async selectAccount(accountId) {
+    cancelPendingServerSearch()
     set({
       selectedAccountId: accountId,
       selectedMailboxPath: null,
@@ -389,6 +400,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   async selectMailbox(mailboxPath) {
     const accountId = get().selectedAccountId
     if (!accountId) return
+    cancelPendingServerSearch()
     set({ selectedMailboxPath: mailboxPath, selectedUid: null, searchResults: null, selectedUids: new Set() })
     const cached = await window.api.messages.list(accountId, mailboxPath)
     set((s) => ({ messagesByKey: { ...s.messagesByKey, [key(accountId, mailboxPath)]: dropPending(cached, s.pendingRemovals) } }))
@@ -760,7 +772,7 @@ export const useMailStore = create<MailState>((set, get) => ({
 
     const trimmed = query.trim()
     if (!accountId || !trimmed) {
-      serverSearchToken++
+      cancelPendingServerSearch()
       set({ searchResults: null, isSearchingServer: false })
       return
     }
@@ -790,6 +802,10 @@ export const useMailStore = create<MailState>((set, get) => ({
         // while this round trip was in flight — drop stale results.
         if (myToken !== serverSearchToken) return
         set((s) => ({ searchResults: mergeServerResults(s.searchResults, serverResults) }))
+      } catch (err) {
+        if (myToken === serverSearchToken) {
+          set({ statusNotice: `Couldn't search the server: ${err instanceof Error ? err.message : String(err)}` })
+        }
       } finally {
         if (myToken === serverSearchToken) set({ isSearchingServer: false })
       }
@@ -797,8 +813,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 
   clearSearch() {
-    if (serverSearchTimer) clearTimeout(serverSearchTimer)
-    serverSearchToken++
+    cancelPendingServerSearch()
     set({ searchQuery: '', searchResults: null, isSearchingServer: false })
   },
 
