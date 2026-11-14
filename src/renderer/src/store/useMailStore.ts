@@ -144,6 +144,11 @@ interface MailState {
   pendingRemovals: Set<string>
   selectedUid: number | null
   bodyCache: Record<string, MessageBody>
+  // Set only for a genuine fetch failure (keyed by the same bodyKey as
+  // bodyCache), not for "still loading" — the reading pane treats "no
+  // cached body and no recorded error" as loading, and this as a reason to
+  // show a retry prompt instead of a skeleton.
+  bodyLoadError: Record<string, string>
   syncStatus: Record<string, SyncProgress>
   accountStatus: Record<string, 'connecting' | 'online' | 'offline' | 'error'>
   // The actual error text for an account currently in 'error' status —
@@ -174,12 +179,18 @@ interface MailState {
   isManualSyncing: boolean
   lastSyncAt: number | null
   statusNotice: string | null
+  // A move/delete that can be reversed (the server told us the message's
+  // new UID at the destination — see moveMessage/bulkMove) offers this
+  // instead of just a plain statusNotice. null means no undo is currently
+  // offered; run() performs the reversal and clears this itself.
+  undo: { message: string; run: () => void } | null
 
   init(): Promise<void>
   selectAccount(accountId: string): Promise<void>
   selectMailbox(mailboxPath: string): Promise<void>
   syncSelectedMailbox(): Promise<void>
   selectMessage(uid: number): Promise<void>
+  loadBody(uid: number): Promise<void>
   refreshMailboxes(accountId: string): Promise<void>
   refreshAccounts(): Promise<void>
   addAccount(config: Omit<AccountConfig, 'id'>, password: string): Promise<void>
@@ -196,6 +207,7 @@ interface MailState {
   bulkDelete(): Promise<void>
   getMail(): Promise<void>
   setStatusNotice(notice: string | null): void
+  dismissUndo(): void
   search(query: string): Promise<void>
   clearSearch(): void
   setSearchScope(scope: 'current' | 'all'): void
@@ -209,12 +221,47 @@ interface MailState {
   emptyMailbox(path: string): Promise<void>
 }
 
+// One reversible move: the message(s) just arrived at toPath (for a bulk
+// undo, uids share one source account+mailbox) and fromPath is where they
+// are right now — i.e. exactly the destPath the original move used. Plain
+// IMAP MOVE commands again, just backwards; no optimistic list tweaking
+// here (same reasoning as the forward move: the moved-back message's real
+// UID at toPath isn't knowable without a resync, so there's nothing honest
+// to splice into messagesByKey in the meantime — the resync this already
+// kicks off is what actually brings it back into view).
+async function undoMove(
+  set: SetFn,
+  accountId: string,
+  fromPath: string,
+  uids: number[],
+  toPath: string
+): Promise<void> {
+  try {
+    await window.api.messages.bulkMove(accountId, fromPath, uids, toPath)
+    set({ statusNotice: uids.length === 1 ? 'Undone' : `Undone — ${uids.length} messages restored` })
+  } catch (err) {
+    set({ statusNotice: `Couldn't undo: ${err instanceof Error ? err.message : String(err)}` })
+  } finally {
+    window.api.mail.sync(accountId, fromPath).catch(() => void 0)
+    window.api.mail.sync(accountId, toPath).catch(() => void 0)
+  }
+}
+
 // Shared by the public bulkMove action and bulkDelete's "route to Trash"
 // step (which needs to move a subset of the selection without disturbing
 // whatever's actually selected at that moment) — takes the message list
-// explicitly rather than reading selectedUids itself.
-async function performBulkMove(set: SetFn, selected: MessageSummary[], destPath: string): Promise<void> {
-  if (selected.length === 0) return
+// explicitly rather than reading selectedUids itself. Returns the subset of
+// `selected` that can be undone (the server handed back a new UID for it —
+// see shared/api.d.ts on messages.bulkMove) grouped the same way a reverse
+// move needs: by (accountId, their *original* mailboxPath), carrying the
+// new UID to move back. Throws (after rolling the optimistic removal back)
+// if the server call itself fails.
+async function performBulkMove(
+  set: SetFn,
+  selected: MessageSummary[],
+  destPath: string
+): Promise<Map<string, { accountId: string; mailboxPath: string; uids: number[] }>> {
+  if (selected.length === 0) return new Map()
   const groups = groupByMailbox(selected)
   const removedKeys = new Set(selected.map(resultKey))
 
@@ -240,10 +287,20 @@ async function performBulkMove(set: SetFn, selected: MessageSummary[], destPath:
   }
 
   try {
-    await Promise.all(
-      [...groups.values()].map((g) => window.api.messages.bulkMove(g.accountId, g.mailboxPath, g.uids, destPath))
+    const moveResults = await Promise.all(
+      [...groups.values()].map((g) =>
+        window.api.messages.bulkMove(g.accountId, g.mailboxPath, g.uids, destPath).then((r) => ({ g, uidMap: r.uidMap }))
+      )
     )
     for (const g of groups.values()) window.api.mail.sync(g.accountId, destPath).catch(() => void 0)
+
+    const undoGroups = new Map<string, { accountId: string; mailboxPath: string; uids: number[] }>()
+    for (const { g, uidMap } of moveResults) {
+      const newUids = g.uids.map((uid) => uidMap[uid]).filter((u): u is number => u != null)
+      if (newUids.length === 0) continue
+      undoGroups.set(key(g.accountId, g.mailboxPath), { accountId: g.accountId, mailboxPath: g.mailboxPath, uids: newUids })
+    }
+    return undoGroups
   } catch (err) {
     set({ statusNotice: `Couldn't move some messages: ${err instanceof Error ? err.message : String(err)}` })
     for (const g of groups.values()) window.api.mail.sync(g.accountId, g.mailboxPath).catch(() => void 0)
@@ -270,6 +327,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   pendingRemovals: new Set<string>(),
   selectedUid: null,
   bodyCache: {},
+  bodyLoadError: {},
   syncStatus: {},
   accountStatus: {},
   accountStatusError: {},
@@ -286,6 +344,7 @@ export const useMailStore = create<MailState>((set, get) => ({
   isManualSyncing: false,
   lastSyncAt: null,
   statusNotice: null,
+  undo: null,
 
   async init() {
     window.api.events.subscribe((payload) => {
@@ -437,6 +496,10 @@ export const useMailStore = create<MailState>((set, get) => ({
     set({ statusNotice: notice })
   },
 
+  dismissUndo() {
+    set({ undo: null })
+  },
+
   async selectMessage(uid) {
     // A plain click/selection always means "focus just this one" — any
     // multi-selection from a previous Ctrl/Cmd-click or Shift-click no
@@ -444,27 +507,45 @@ export const useMailStore = create<MailState>((set, get) => ({
     set({ selectedUid: uid, selectedUids: new Set() })
     const current = findDisplayedMessage(get(), uid)
     if (!current) return
-    const { accountId, mailboxPath } = current
 
+    // setFlags handles its own failure (reverts the optimistic flag change
+    // and shows a notice) without rejecting, so a mark-as-read failure here
+    // can never stop the body load below from running.
     if (!current.flags.seen && get().settings?.markAsReadBehavior !== 'never') {
       await get().setFlags(uid, { seen: true })
     }
 
+    await get().loadBody(uid)
+  },
+
+  // Split out of selectMessage so the reading pane's Retry button (shown
+  // when bodyLoadError is set) can re-run just this part, without redoing
+  // the mark-as-read step or disturbing the current selection.
+  async loadBody(uid) {
+    const current = findDisplayedMessage(get(), uid)
+    if (!current) return
+    const { accountId, mailboxPath } = current
     const bodyKey = `${accountId}::${mailboxPath}::${uid}`
-    if (!get().bodyCache[bodyKey]) {
-      try {
-        const body = await window.api.messages.getBody(accountId, mailboxPath, uid)
-        set((s) => ({ bodyCache: { ...s.bodyCache, [bodyKey]: body } }))
-      } catch (err) {
-        // A message that's gone from the server already removed itself from
-        // the list via the 'message-removed' event, so say nothing extra
-        // here. Anything else is a genuine fetch failure worth surfacing
-        // rather than leaving the reading pane mysteriously empty.
-        if (!String(err).includes('TINY_MAIL_MESSAGE_GONE')) {
-          set({
-            statusNotice: `Couldn't load that message: ${err instanceof Error ? err.message : String(err)}`
-          })
-        }
+    if (get().bodyCache[bodyKey]) return
+
+    set((s) => {
+      if (!(bodyKey in s.bodyLoadError)) return {}
+      const next = { ...s.bodyLoadError }
+      delete next[bodyKey]
+      return { bodyLoadError: next }
+    })
+
+    try {
+      const body = await window.api.messages.getBody(accountId, mailboxPath, uid)
+      set((s) => ({ bodyCache: { ...s.bodyCache, [bodyKey]: body } }))
+    } catch (err) {
+      // A message that's gone from the server already removed itself from
+      // the list via the 'message-removed' event, so say nothing extra
+      // here. Anything else is a genuine fetch failure worth surfacing
+      // rather than leaving the reading pane mysteriously empty.
+      if (!String(err).includes('TINY_MAIL_MESSAGE_GONE')) {
+        const message = `Couldn't load that message: ${err instanceof Error ? err.message : String(err)}`
+        set((s) => ({ bodyLoadError: { ...s.bodyLoadError, [bodyKey]: message }, statusNotice: message }))
       }
     }
   },
@@ -494,6 +575,7 @@ export const useMailStore = create<MailState>((set, get) => ({
     if (!before) return
     const { accountId, mailboxPath } = before
     const k = key(accountId, mailboxPath)
+    const previousFlags = before.flags
 
     const apply = (m: MessageSummary): MessageSummary =>
       m.mailboxPath === mailboxPath && m.uid === uid ? { ...m, flags: { ...m.flags, ...flags } } : m
@@ -503,11 +585,28 @@ export const useMailStore = create<MailState>((set, get) => ({
       searchResults: s.searchResults?.map(apply) ?? null
     }))
 
-    if (typeof flags.seen === 'boolean' && flags.seen !== before.flags.seen) {
+    if (typeof flags.seen === 'boolean' && flags.seen !== previousFlags.seen) {
       adjustUnreadCount(set, accountId, mailboxPath, flags.seen ? -1 : 1)
     }
 
-    await window.api.messages.setFlags(accountId, mailboxPath, uid, flags)
+    try {
+      await window.api.messages.setFlags(accountId, mailboxPath, uid, flags)
+    } catch (err) {
+      // Without this, a failed flag change (network blip, server rejected
+      // it) left the optimistic change stuck — showing read/flagged/etc.
+      // locally while the server still disagrees, with no indication
+      // anything had gone wrong.
+      const revert = (m: MessageSummary): MessageSummary =>
+        m.mailboxPath === mailboxPath && m.uid === uid ? { ...m, flags: previousFlags } : m
+      set((s) => ({
+        messagesByKey: { ...s.messagesByKey, [k]: (s.messagesByKey[k] ?? []).map(revert) },
+        searchResults: s.searchResults?.map(revert) ?? null,
+        statusNotice: `Couldn't update that message: ${err instanceof Error ? err.message : String(err)}`
+      }))
+      if (typeof flags.seen === 'boolean' && flags.seen !== previousFlags.seen) {
+        adjustUnreadCount(set, accountId, mailboxPath, flags.seen ? 1 : -1)
+      }
+    }
   },
 
   async moveMessage(uid, destPath) {
@@ -537,8 +636,9 @@ export const useMailStore = create<MailState>((set, get) => ({
       adjustUnreadCount(set, accountId, mailboxPath, -1)
     }
 
+    let newUid: number | null = null
     try {
-      await window.api.messages.move(accountId, mailboxPath, uid, destPath)
+      newUid = (await window.api.messages.move(accountId, mailboxPath, uid, destPath)).newUid
     } catch (err) {
       set((s) => {
         const next = new Set(s.pendingRemovals)
@@ -558,13 +658,27 @@ export const useMailStore = create<MailState>((set, get) => ({
     set((s) => {
       const next = new Set(s.pendingRemovals)
       next.delete(rKey)
-      return { pendingRemovals: next, statusNotice: `Moved to ${destPath}` }
+      return { pendingRemovals: next }
     })
 
     // The message gets a new UID in the destination mailbox, which we don't
-    // know locally (IMAP MOVE/COPY doesn't hand it back in a form we parse
-    // here) — pull the destination from the server instead of guessing.
+    // know locally unless the server handed it back via UIDPLUS (newUid) —
+    // pull the destination from the server instead of guessing either way.
     window.api.mail.sync(accountId, destPath).catch(() => void 0)
+
+    if (newUid != null) {
+      set({
+        undo: {
+          message: `Moved to ${destPath}`,
+          run: () => {
+            set({ undo: null })
+            undoMove(set, accountId, destPath, [newUid as number], mailboxPath)
+          }
+        }
+      })
+    } else {
+      set({ statusNotice: `Moved to ${destPath}` })
+    }
   },
 
   async deleteMessage(uid) {
@@ -685,8 +799,23 @@ export const useMailStore = create<MailState>((set, get) => ({
     const selected = findDisplayedMessagesByKeys(get(), get().selectedUids)
     if (selected.length === 0) return
     try {
-      await performBulkMove(set, selected, destPath)
-      set({ statusNotice: `Moved ${selected.length} message${selected.length === 1 ? '' : 's'} to ${destPath}` })
+      const undoGroups = [...(await performBulkMove(set, selected, destPath)).values()]
+      const n = selected.length
+      const label = `Moved ${n} message${n === 1 ? '' : 's'} to ${destPath}`
+      const undoableCount = undoGroups.reduce((sum, g) => sum + g.uids.length, 0)
+      if (undoableCount === n) {
+        set({
+          undo: {
+            message: label,
+            run: () => {
+              set({ undo: null })
+              for (const g of undoGroups) undoMove(set, g.accountId, destPath, g.uids, g.mailboxPath)
+            }
+          }
+        })
+      } else {
+        set({ statusNotice: label })
+      }
     } catch {
       // performBulkMove already set an error statusNotice.
     }
@@ -717,9 +846,19 @@ export const useMailStore = create<MailState>((set, get) => ({
       }
     }
 
+    // Each account's batch moves to its own Trash path, so a reverse move
+    // needs its own group per account+trashPath — collected across all of
+    // them so one undo can cover the whole delete in a single toast.
+    const undoBatches: Array<{ accountId: string; trashPath: string; mailboxPath: string; uids: number[] }> = []
+    let toTrashCount = 0
+
     try {
       for (const { trashPath, msgs } of toTrashByAccount.values()) {
-        await performBulkMove(set, msgs, trashPath)
+        toTrashCount += msgs.length
+        const undoGroups = await performBulkMove(set, msgs, trashPath)
+        for (const g of undoGroups.values()) {
+          undoBatches.push({ accountId: g.accountId, trashPath, mailboxPath: g.mailboxPath, uids: g.uids })
+        }
       }
 
       if (toPurge.length > 0) {
@@ -757,7 +896,27 @@ export const useMailStore = create<MailState>((set, get) => ({
         }
       }
 
-      set({ statusNotice: `Deleted ${selected.length} message${selected.length === 1 ? '' : 's'}` })
+      const n = selected.length
+      const label = `Deleted ${n} message${n === 1 ? '' : 's'}`
+      const undoableCount = undoBatches.reduce((sum, b) => sum + b.uids.length, 0)
+      // Only offer Undo when every message in the batch actually went to
+      // Trash and came back with a usable new UID — a selection that mixed
+      // in an already-in-Trash message (permanently purged, toPurge above)
+      // can't be undone as a whole, and a partial undo would be more
+      // confusing than useful.
+      if (toPurge.length === 0 && undoableCount === toTrashCount && undoBatches.length > 0) {
+        set({
+          undo: {
+            message: label,
+            run: () => {
+              set({ undo: null })
+              for (const b of undoBatches) undoMove(set, b.accountId, b.trashPath, b.uids, b.mailboxPath)
+            }
+          }
+        })
+      } else {
+        set({ statusNotice: label })
+      }
     } catch (err) {
       set({ statusNotice: `Couldn't delete some messages: ${err instanceof Error ? err.message : String(err)}` })
       const groups = groupByMailbox(selected)

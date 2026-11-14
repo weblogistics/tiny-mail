@@ -56,6 +56,8 @@ export function ReadingPane(): JSX.Element {
   const messagesByKey = useMailStore((s) => s.messagesByKey)
   const searchResults = useMailStore((s) => s.searchResults)
   const bodyCache = useMailStore((s) => s.bodyCache)
+  const bodyLoadError = useMailStore((s) => s.bodyLoadError)
+  const loadBody = useMailStore((s) => s.loadBody)
   const settings = useMailStore((s) => s.settings)
   const [allowRemoteImages, setAllowRemoteImages] = useState(false)
   const [emailDark, setEmailDark] = useState(false)
@@ -75,6 +77,7 @@ export function ReadingPane(): JSX.Element {
   // selection would look up (or collide with) a different message's body.
   const bodyKey = message ? `${message.accountId}::${message.mailboxPath}::${message.uid}` : null
   const body = bodyKey ? bodyCache[bodyKey] : undefined
+  const bodyError = bodyKey ? bodyLoadError[bodyKey] : undefined
 
   // Reset to the user's default for each newly-opened message rather than
   // leaving remote images permanently unblocked after the first "Load
@@ -300,16 +303,33 @@ export function ReadingPane(): JSX.Element {
         )}
       </div>
       <div className={styles.bodyWrap}>
-        {srcDoc ? (
-          <iframe
-            ref={iframeRef}
-            className={styles.bodyFrame}
-            sandbox="allow-same-origin allow-popups"
-            srcDoc={srcDoc}
-            onLoad={handleIframeLoad}
-          />
+        {body ? (
+          srcDoc ? (
+            <iframe
+              ref={iframeRef}
+              className={styles.bodyFrame}
+              sandbox="allow-same-origin allow-popups"
+              srcDoc={srcDoc}
+              onLoad={handleIframeLoad}
+            />
+          ) : (
+            <pre className={styles.plainBody}>{body.text || ''}</pre>
+          )
+        ) : bodyError ? (
+          <div className={styles.bodyError}>
+            <IconAlertTriangle width={18} height={18} />
+            <div>{bodyError}</div>
+            <button onClick={() => loadBody(message.uid)}>Retry</button>
+          </div>
         ) : (
-          <pre className={styles.plainBody}>{body?.text || ''}</pre>
+          <div className={styles.skeleton} aria-hidden="true">
+            <div className={styles.skeletonLine} style={{ width: '88%' }} />
+            <div className={styles.skeletonLine} style={{ width: '95%' }} />
+            <div className={styles.skeletonLine} style={{ width: '70%' }} />
+            <div className={styles.skeletonGap} />
+            <div className={styles.skeletonLine} style={{ width: '92%' }} />
+            <div className={styles.skeletonLine} style={{ width: '60%' }} />
+          </div>
         )}
         {hoveredLink && (
           <div className={styles.linkPreview} title={hoveredLink}>

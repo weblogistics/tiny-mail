@@ -41,7 +41,10 @@ export interface TinyMailApi {
       uid: number,
       flags: Partial<MessageSummary['flags']>
     ): Promise<void>
-    move(accountId: string, mailboxPath: string, uid: number, destPath: string): Promise<void>
+    // newUid is the message's UID in destPath (from the server's UIDPLUS
+    // response), or null if the server doesn't support UIDPLUS — the
+    // renderer uses it to offer Undo on a move/delete.
+    move(accountId: string, mailboxPath: string, uid: number, destPath: string): Promise<{ newUid: number | null }>
     delete(accountId: string, mailboxPath: string, uid: number): Promise<void>
     bulkSetFlags(
       accountId: string,
@@ -49,7 +52,14 @@ export interface TinyMailApi {
       uids: number[],
       flags: Partial<MessageSummary['flags']>
     ): Promise<void>
-    bulkMove(accountId: string, mailboxPath: string, uids: number[], destPath: string): Promise<void>
+    // uidMap keys are the uids moved, as passed in; values are their UID in
+    // destPath (see move() above re: UIDPLUS).
+    bulkMove(
+      accountId: string,
+      mailboxPath: string,
+      uids: number[],
+      destPath: string
+    ): Promise<{ uidMap: Record<number, number> }>
     bulkDelete(accountId: string, mailboxPath: string, uids: number[]): Promise<void>
   }
   mail: {

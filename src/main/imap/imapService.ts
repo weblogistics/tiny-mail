@@ -140,6 +140,23 @@ export class ImapService {
   // superseded it (see searchServer) and stop early instead of continuing
   // to hold the shared search connection's mailbox lock against it.
   private latestSearchRequest = new Map<string, string>()
+  // Everything the user directly triggers and expects to feel instant —
+  // opening a message or attachment, flagging, moving, deleting, sending,
+  // folder management — shares this connection instead of the main one.
+  // The main connection is what syncMailbox and its post-sync body prefetch
+  // (prefetchRecentBodies) run on, and either can hold a mailbox lock for a
+  // long time (a big first sync, a long backfill) with nothing meaningful
+  // to interrupt it with — previously that meant clicking a message while
+  // either was in progress had to queue behind it on the same wire. A
+  // second IMAP session for the account sidesteps that entirely, the same
+  // way searchClients already does for search.
+  private interactiveClients = new Map<string, ImapFlow>()
+  private interactiveIdleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  // Closed after this long with no interactive activity rather than kept
+  // open forever, so an account only pays for a third connection while it's
+  // actually being clicked around in — relevant for servers with a low
+  // per-account IMAP connection cap.
+  private static readonly INTERACTIVE_IDLE_CLOSE_MS = 5 * 60 * 1000
   // Guards against piling up overlapping syncMailbox() calls when the
   // server's 'exists' push notification (new mail arriving) fires again
   // before a previous resync has finished — queues at most one follow-up
@@ -190,14 +207,17 @@ export class ImapService {
       })
   }
 
-  // pool 'search' gets its own connection (see searchClients above) so a
-  // long-running search never queues behind — or blocks — ordinary
-  // operations on the main connection, and vice versa. It skips the
-  // account-status events and push-notification wiring that the main
-  // connection drives, since those describe the account as a whole and a
-  // search connection coming or going shouldn't move that indicator.
-  private async getClient(accountId: string, pool: 'main' | 'search' = 'main'): Promise<ImapFlow> {
-    const clients = pool === 'main' ? this.clients : this.searchClients
+  // pool 'search' and 'interactive' each get their own connection (see
+  // searchClients/interactiveClients above) so a long-running operation on
+  // one never queues behind — or blocks — the others, since ImapFlow
+  // serializes commands per connection. Only 'main' drives the
+  // account-status events and push-notification wiring, since those
+  // describe the account as a whole and a search/interactive connection
+  // coming or going shouldn't move that indicator.
+  private async getClient(accountId: string, pool: 'main' | 'search' | 'interactive' = 'main'): Promise<ImapFlow> {
+    const clients = pool === 'main' ? this.clients : pool === 'search' ? this.searchClients : this.interactiveClients
+    if (pool === 'interactive') this.touchInteractiveIdle(accountId)
+
     const existing = clients.get(accountId)
     if (existing && existing.usable) {
       if (pool === 'main') {
@@ -236,7 +256,7 @@ export class ImapService {
       })
     } else {
       client.on('error', (err: Error) => {
-        console.error('[imap] search connection error', accountId, err)
+        console.error(`[imap] ${pool} connection error`, accountId, err)
       })
     }
 
@@ -258,6 +278,23 @@ export class ImapService {
       this.watchForNewMail(accountId, client)
     }
     return client
+  }
+
+  // Resets the idle clock on every interactive call (a fresh connect
+  // included) so a flurry of clicks keeps reusing one connection, but it
+  // gets logged out and dropped once nothing's touched it for a while
+  // instead of sitting open for the rest of the session.
+  private touchInteractiveIdle(accountId: string): void {
+    const existing = this.interactiveIdleTimers.get(accountId)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      this.interactiveIdleTimers.delete(accountId)
+      const client = this.interactiveClients.get(accountId)
+      if (!client) return
+      this.interactiveClients.delete(accountId)
+      client.logout().catch(() => void 0)
+    }, ImapService.INTERACTIVE_IDLE_CLOSE_MS)
+    this.interactiveIdleTimers.set(accountId, timer)
   }
 
   async testConnection(accountId: string): Promise<void> {
@@ -367,7 +404,7 @@ export class ImapService {
 
     for (const m of recent) {
       try {
-        await this.getMessageBody(accountId, mailboxPath, m.uid)
+        await this.getMessageBody(accountId, mailboxPath, m.uid, 'main')
       } catch {
         // A message that vanished, or any other one-off fetch failure,
         // shouldn't stop the rest of the batch from prefetching.
@@ -779,7 +816,7 @@ export class ImapService {
     mailboxPath: string,
     uid: number
   ): Promise<Awaited<ReturnType<typeof simpleParser>>> {
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       return await this.downloadAndParseRaw(client, accountId, mailboxPath, uid)
@@ -805,7 +842,7 @@ export class ImapService {
       }
     }
 
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       const { meta, content } = await client.download(String(uid), partId, { uid: true })
@@ -834,7 +871,17 @@ export class ImapService {
   // *entire* raw message (every attachment included) just to show the
   // text, which made opening a message with a large attachment as slow as
   // downloading that attachment.
-  async getMessageBody(accountId: string, mailboxPath: string, uid: number): Promise<MessageBody> {
+  // pool defaults to 'interactive' for the common case — someone clicked a
+  // message and is waiting on it — but prefetchRecentBodies passes 'main'
+  // explicitly: it calls this in a loop right after every sync, and if it
+  // ran on the interactive connection instead, it would be exactly the kind
+  // of background work that connection exists to get out of the way of.
+  async getMessageBody(
+    accountId: string,
+    mailboxPath: string,
+    uid: number,
+    pool: 'main' | 'interactive' = 'interactive'
+  ): Promise<MessageBody> {
     const cached = getMessageBody(accountId, mailboxPath, uid)
     // A row cached before rawHeaders/replyTo/returnPath existed has an
     // empty rawHeaders — every real message has headers, so that's an
@@ -844,7 +891,7 @@ export class ImapService {
     // anything synced before this feature shipped.
     if (cached && cached.rawHeaders) return cached
 
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, pool)
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       const info = await client.fetchOne(
@@ -955,7 +1002,7 @@ export class ImapService {
     uid: number,
     flags: Partial<MessageSummary['flags']>
   ): Promise<void> {
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       const add: string[] = []
@@ -977,19 +1024,26 @@ export class ImapService {
     }
   }
 
-  async moveMessage(accountId: string, mailboxPath: string, uid: number, destPath: string): Promise<void> {
-    const client = await this.getClient(accountId)
+  // The returned newUid (the message's UID in destPath, from the server's
+  // UIDPLUS COPYUID response) is what lets the renderer offer a real "Undo"
+  // for a move/delete — without it, reversing the move would mean guessing
+  // which message in the destination folder was the one that just arrived.
+  // null when the server lacks UIDPLUS (rare today), in which case the
+  // renderer just can't offer Undo for that particular move.
+  async moveMessage(accountId: string, mailboxPath: string, uid: number, destPath: string): Promise<{ newUid: number | null }> {
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(mailboxPath)
     try {
-      await client.messageMove({ uid: String(uid) }, destPath)
+      const result = await client.messageMove({ uid: String(uid) }, destPath)
       removeMessage(accountId, mailboxPath, uid)
+      return { newUid: result ? result.uidMap?.get(uid) ?? null : null }
     } finally {
       lock.release()
     }
   }
 
   async deleteMessage(accountId: string, mailboxPath: string, uid: number): Promise<void> {
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       await client.messageDelete({ uid: String(uid) })
@@ -1012,7 +1066,7 @@ export class ImapService {
     flags: Partial<MessageSummary['flags']>
   ): Promise<void> {
     if (uids.length === 0) return
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       const add: string[] = []
@@ -1034,13 +1088,26 @@ export class ImapService {
     }
   }
 
-  async moveMessages(accountId: string, mailboxPath: string, uids: number[], destPath: string): Promise<void> {
-    if (uids.length === 0) return
-    const client = await this.getClient(accountId)
+  // See moveMessage above re: the returned uidMap (old UID -> new UID in
+  // destPath) — same UIDPLUS-dependent story, just one entry per message
+  // instead of one.
+  async moveMessages(
+    accountId: string,
+    mailboxPath: string,
+    uids: number[],
+    destPath: string
+  ): Promise<{ uidMap: Record<number, number> }> {
+    if (uids.length === 0) return { uidMap: {} }
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(mailboxPath)
     try {
-      await client.messageMove(uids, destPath, { uid: true })
+      const result = await client.messageMove(uids, destPath, { uid: true })
       for (const uid of uids) removeMessage(accountId, mailboxPath, uid)
+      const uidMap: Record<number, number> = {}
+      if (result && result.uidMap) {
+        for (const [oldUid, newUid] of result.uidMap) uidMap[oldUid] = newUid
+      }
+      return { uidMap }
     } finally {
       lock.release()
     }
@@ -1048,7 +1115,7 @@ export class ImapService {
 
   async deleteMessages(accountId: string, mailboxPath: string, uids: number[]): Promise<void> {
     if (uids.length === 0) return
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(mailboxPath)
     try {
       await client.messageDelete(uids, { uid: true })
@@ -1062,7 +1129,7 @@ export class ImapService {
   // ImapFlow lets it handle the server's actual hierarchy delimiter ('/'
   // vs '.', etc.) itself instead of us having to know it up front.
   async createMailbox(accountId: string, name: string, parentPath: string | null = null): Promise<void> {
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     if (!parentPath) {
       await client.mailboxCreate([name])
     } else {
@@ -1073,7 +1140,7 @@ export class ImapService {
   }
 
   async renameMailbox(accountId: string, path: string, newName: string): Promise<void> {
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     const delimiter = cachedListMailboxes(accountId).find((m) => m.path === path)?.delimiter || '/'
     const segments = path.split(delimiter)
     segments[segments.length - 1] = newName
@@ -1085,14 +1152,14 @@ export class ImapService {
   }
 
   async deleteMailbox(accountId: string, path: string): Promise<void> {
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     await client.mailboxDelete(path)
     removeCachedMailbox(accountId, path)
     await this.listMailboxes(accountId)
   }
 
   async emptyMailbox(accountId: string, path: string): Promise<void> {
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     const lock = await client.getMailboxLock(path)
     try {
       const total = (client.mailbox as MailboxObject).exists
@@ -1110,12 +1177,15 @@ export class ImapService {
     raw: Buffer,
     flags: string[]
   ): Promise<void> {
-    const client = await this.getClient(accountId)
+    const client = await this.getClient(accountId, 'interactive')
     await client.append(mailboxPath, raw, flags)
   }
 
   async disconnectAll(): Promise<void> {
-    for (const client of [...this.clients.values(), ...this.searchClients.values()]) {
+    for (const timer of this.interactiveIdleTimers.values()) clearTimeout(timer)
+    this.interactiveIdleTimers.clear()
+
+    for (const client of [...this.clients.values(), ...this.searchClients.values(), ...this.interactiveClients.values()]) {
       try {
         await client.logout()
       } catch {
@@ -1124,5 +1194,6 @@ export class ImapService {
     }
     this.clients.clear()
     this.searchClients.clear()
+    this.interactiveClients.clear()
   }
 }

@@ -204,7 +204,7 @@ export function registerIpcHandlers(
     IpcChannels.MessagesMove,
     async (_e, accountId: string, mailboxPath: string, uid: number, destPath: string) => {
       try {
-        await imapService.moveMessage(accountId, mailboxPath, uid, destPath)
+        return await imapService.moveMessage(accountId, mailboxPath, uid, destPath)
       } catch (err) {
         console.error('[messages:move] failed', { accountId, mailboxPath, uid, destPath }, err)
         throw err
@@ -230,7 +230,7 @@ export function registerIpcHandlers(
     IpcChannels.MessagesBulkMove,
     async (_e, accountId: string, mailboxPath: string, uids: number[], destPath: string) => {
       try {
-        await imapService.moveMessages(accountId, mailboxPath, uids, destPath)
+        return await imapService.moveMessages(accountId, mailboxPath, uids, destPath)
       } catch (err) {
         console.error('[messages:bulk-move] failed', { accountId, mailboxPath, count: uids.length, destPath }, err)
         throw err

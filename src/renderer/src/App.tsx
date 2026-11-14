@@ -7,6 +7,7 @@ import { MessageList } from './components/MessageList'
 import { ReadingPane } from './components/ReadingPane'
 import { StatusBar } from './components/StatusBar'
 import { AccountSetupDialog } from './components/AccountSetupDialog'
+import { Toast } from './components/Toast'
 
 export default function App(): JSX.Element {
   const init = useMailStore((s) => s.init)
@@ -48,6 +49,7 @@ export default function App(): JSX.Element {
         <AccountSetupDialog />
       </div>
       <StatusBar />
+      <Toast />
     </div>
   )
 }
