@@ -912,15 +912,18 @@ export class ImapService {
       // full-parse path rather than show a blank message.
       if (!htmlPartId && !textPartId) {
         const parsed = await this.downloadAndParseRaw(client, accountId, mailboxPath, uid)
+        const rawHtml = typeof parsed.html === 'string' ? parsed.html : null
+        // Same reasoning as the cidReferenced set below: whether the html
+        // actually uses a part's cid, not Content-Disposition, is what
+        // decides whether it's a real attachment or already showing inline.
         const attachments: MessageAttachment[] = (parsed.attachments || []).map((a, idx) => ({
           filename: a.filename || `attachment-${idx + 1}`,
           contentType: a.contentType,
           size: a.size,
           partId: `legacy:${idx}`,
           contentId: a.cid,
-          inline: a.contentDisposition === 'inline'
+          inline: !!(a.cid && rawHtml && rawHtml.includes(`cid:${a.cid}`))
         }))
-        const rawHtml = typeof parsed.html === 'string' ? parsed.html : null
         const body: MessageBody = {
           accountId,
           mailboxPath,
@@ -948,13 +951,21 @@ export class ImapService {
         text = content ? (await streamToBuffer(content)).toString('utf-8') : null
       }
 
-      // Only fetch bytes for inline images the html actually references —
-      // a part can be flagged "inline" by disposition/content-id alone
-      // without the html ever using it.
+      // Whether the html actually references a part's cid is what decides
+      // both whether to fetch+embed its bytes below and whether to hide it
+      // from the attachment list afterwards — Content-Disposition alone
+      // (extractBodyParts' part.inline) is too unreliable a signal on its
+      // own: some senders (signature-generator tools, seen in the wild)
+      // mark a cid-referenced image "attachment" rather than "inline",
+      // which previously meant it was neither embedded in the body nor
+      // excluded from the attachment chips — shown as a broken image AND
+      // listed again as a download.
+      const cidReferenced = new Set<string>()
       if (html) {
         const inlineImages: InlineImage[] = []
         for (const part of parts) {
-          if (!part.inline || !part.contentId || !html.includes(`cid:${part.contentId}`)) continue
+          if (!part.contentId || !html.includes(`cid:${part.contentId}`)) continue
+          cidReferenced.add(part.contentId)
           const { content } = await client.download(String(uid), part.partId, { uid: true })
           if (!content) continue
           inlineImages.push({
@@ -972,7 +983,7 @@ export class ImapService {
         size: p.size,
         partId: p.partId,
         contentId: p.contentId ?? undefined,
-        inline: p.inline
+        inline: !!(p.contentId && cidReferenced.has(p.contentId))
       }))
 
       const body: MessageBody = {

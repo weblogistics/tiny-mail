@@ -111,6 +111,12 @@ export function ReadingPane(): JSX.Element {
     return sanitizeMessageHtml(body.html, allowRemoteImages)
   }, [body?.html, allowRemoteImages])
 
+  // Inline ones (signature logos, cid-referenced images actually embedded
+  // in the html above) have nothing useful to open as a download — they're
+  // already showing in the body itself, and listing them again here just
+  // reads as clutter.
+  const realAttachments = useMemo(() => body?.attachments.filter((a) => !a.inline) ?? [], [body?.attachments])
+
   if (selectedUids.size > 1) {
     return (
       <div className={styles.pane}>
@@ -272,9 +278,9 @@ export function ReadingPane(): JSX.Element {
             )}
           </div>
         </div>
-        {body && body.attachments.length > 0 && (
+        {realAttachments.length > 0 && (
           <div className={styles.attachments}>
-            {body.attachments.map((a) => (
+            {realAttachments.map((a) => (
               <button
                 key={a.partId}
                 className={styles.attachmentChip}

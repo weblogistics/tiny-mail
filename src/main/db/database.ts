@@ -81,6 +81,9 @@ export function getDb(): Database.Database {
   ensureColumn(db, 'message_bodies', 'replyToJson', `ALTER TABLE message_bodies ADD COLUMN replyToJson TEXT DEFAULT '[]'`)
   ensureColumn(db, 'message_bodies', 'returnPath', `ALTER TABLE message_bodies ADD COLUMN returnPath TEXT`)
   ensureColumn(db, 'message_bodies', 'rawHeaders', `ALTER TABLE message_bodies ADD COLUMN rawHeaders TEXT DEFAULT ''`)
+  // Defaults to 0 for every row that existed before this column did — see
+  // CURRENT_BODY_VERSION in messageCache.ts for why that matters.
+  ensureColumn(db, 'message_bodies', 'bodyVersion', `ALTER TABLE message_bodies ADD COLUMN bodyVersion INTEGER DEFAULT 0`)
 
   return db
 }

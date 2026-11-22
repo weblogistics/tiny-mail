@@ -1,6 +1,20 @@
 import { getDb } from './database'
 import type { MailboxSummary, MessageBody, MessageSummary, SearchOptions } from '@shared/types'
 
+// Bumped whenever a cached message_bodies row's shape can go stale in a way
+// that matters beyond just missing a field (ensureColumn/NULL-coalescing in
+// getMessageBody already covers that case). The one time this has mattered
+// so far: attachment partId used to be a bare array index into a
+// full-raw-message parse ("0", "1", ...); it's now either a real IMAP body
+// section number or an explicitly-marked "legacy:<index>" one (see
+// imapService.ts's getAttachmentContent/getMessageBody). A row written
+// under the old scheme has neither marker, so today's code would
+// misinterpret its partId as a real section number and fetch the wrong
+// bytes entirely — silently "working" but handing back garbage. Rows
+// written before this column existed default to 0 (see database.ts),
+// which is why this starts at 1 rather than 0.
+const CURRENT_BODY_VERSION = 1
+
 export function upsertMailbox(mb: MailboxSummary): void {
   getDb()
     .prepare(
@@ -209,11 +223,11 @@ export function removeMessage(accountId: string, mailboxPath: string, uid: numbe
 export function saveMessageBody(body: MessageBody): void {
   getDb()
     .prepare(
-      `INSERT INTO message_bodies (accountId, mailboxPath, uid, html, text, attachmentsJson, replyToJson, returnPath, rawHeaders)
-       VALUES (@accountId, @mailboxPath, @uid, @html, @text, @attachmentsJson, @replyToJson, @returnPath, @rawHeaders)
+      `INSERT INTO message_bodies (accountId, mailboxPath, uid, html, text, attachmentsJson, replyToJson, returnPath, rawHeaders, bodyVersion)
+       VALUES (@accountId, @mailboxPath, @uid, @html, @text, @attachmentsJson, @replyToJson, @returnPath, @rawHeaders, @bodyVersion)
        ON CONFLICT(accountId, mailboxPath, uid) DO UPDATE SET
          html=@html, text=@text, attachmentsJson=@attachmentsJson,
-         replyToJson=@replyToJson, returnPath=@returnPath, rawHeaders=@rawHeaders`
+         replyToJson=@replyToJson, returnPath=@returnPath, rawHeaders=@rawHeaders, bodyVersion=@bodyVersion`
     )
     .run({
       accountId: body.accountId,
@@ -224,7 +238,8 @@ export function saveMessageBody(body: MessageBody): void {
       attachmentsJson: JSON.stringify(body.attachments),
       replyToJson: JSON.stringify(body.replyTo),
       returnPath: body.returnPath,
-      rawHeaders: body.rawHeaders
+      rawHeaders: body.rawHeaders,
+      bodyVersion: CURRENT_BODY_VERSION
     })
 }
 
@@ -246,9 +261,15 @@ export function getMessageBody(
         replyToJson: string | null
         returnPath: string | null
         rawHeaders: string | null
+        bodyVersion: number
       }
     | undefined
   if (!row) return undefined
+  // Treated exactly like a cache miss (not returned, caller re-fetches and
+  // overwrites this row) rather than patched in place — see
+  // CURRENT_BODY_VERSION above for why a stale row can't just be trusted
+  // with its existing fields.
+  if (row.bodyVersion !== CURRENT_BODY_VERSION) return undefined
   return {
     accountId: row.accountId,
     mailboxPath: row.mailboxPath,
